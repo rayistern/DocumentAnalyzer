@@ -10,9 +10,12 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@types/pg": "^8.11.11",
     "commander": "^13.1.0",
     "dotenv": "^16.4.7",
+    "drizzle-orm": "^0.39.2",
     "openai": "^4.83.0",
-    "pg": "^8.13.1"
+    "pg": "^8.13.1",
+    "postgres": "^3.4.5"
   }
 }
