@@ -3,7 +3,7 @@
 import { Command } from 'commander';
 import dotenv from 'dotenv';
 import { processFile } from './services/openaiService.mjs';
-import { saveResult, getResults, getDocumentChunks } from './services/storageService.mjs';
+import { saveResult, getResults } from './services/storageService.mjs';
 import { readTextFile } from './utils/fileReader.mjs';
 
 dotenv.config();
@@ -30,13 +30,20 @@ program
             const result = await processFile(content, options.type, options.maxChunkLength);
 
             console.log('Storing result...');
-            const savedResult = await saveResult({
+            await saveResult({
                 filepath,
                 type: options.type,
                 content: result,
                 originalText: content,
                 warnings: result.warnings
             });
+
+            if (result.textToRemove && result.textToRemove.length > 0) {
+                console.log('\nIdentified text to remove:');
+                result.textToRemove.forEach(item => {
+                    console.log(`- "${item.text}" (positions ${item.startPosition}-${item.endPosition})`);
+                });
+            }
 
             if (result.warnings && result.warnings.length > 0) {
                 console.log('\nValidation Warnings:');
@@ -52,7 +59,7 @@ program
 
 program
     .command('list')
-    .description('List all processed documents and their chunks')
+    .description('List all processed documents')
     .action(async () => {
         try {
             const results = await getResults();
@@ -61,9 +68,15 @@ program
                 console.log(`\nDocument: ${doc.filepath}`);
                 console.log(`Total Length: ${doc.totalLength}`);
                 console.log(`Created: ${doc.createdAt}`);
-                console.log('Chunks:', doc.chunks.length);
-                doc.chunks.forEach((chunk, i) => {
-                    console.log(`  ${i + 1}. ${chunk.firstWord}...${chunk.lastWord} (${chunk.endIndex - chunk.startIndex} chars)`);
+                if (doc.content.textToRemove) {
+                    console.log('Removed Elements:');
+                    doc.content.textToRemove.forEach(item => {
+                        console.log(`  - "${item.text}" (pos ${item.startPosition}-${item.endPosition})`);
+                    });
+                }
+                console.log('Chunks:', doc.content.chunks.length);
+                doc.content.chunks.forEach((chunk, i) => {
+                    console.log(`  ${i + 1}. ${chunk.firstWord}...${chunk.lastWord} (${chunk.endIndex - chunk.startIndex + 1} chars)`);
                 });
             });
         } catch (error) {

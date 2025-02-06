@@ -1,6 +1,7 @@
 export const OPENAI_SETTINGS = {
     model: "o1-preview",  // newest model as of May 13, 2024
     defaultMaxChunkLength: 2000,
+    textRemovalPositionTolerance: 5  // Maximum character difference allowed for text removal positions
 };
 
 export const OPENAI_PROMPTS = {
@@ -14,7 +15,7 @@ export const OPENAI_PROMPTS = {
     },
     chunk: {
         role: "user",
-        content: (maxChunkLength) => `Divide the following text into chunks following these strict rules:
+        content: (maxChunkLength) => `Divide the following text into chunks and identify text to be removed, following these strict rules:
             1. Each chunk MUST end with a complete sentence (ending with ., !, or ?)
             2. Never split in the middle of a sentence
             3. Keep each chunk under ${maxChunkLength} characters
@@ -24,30 +25,35 @@ export const OPENAI_PROMPTS = {
             7. Each subsequent chunk MUST start right after the previous chunk's ending punctuation
             8. There MUST NOT be any gaps or overlaps between chunks
             9. Include all punctuation in the chunks
+            10. Identify any text that should be removed, such as:
+                - Page numbers and headers (e.g., "Page 1", "Chapter 1:")
+                - Divider lines (e.g., "----------")
+                - Headers and footers
+                - Version numbers or draft markings
+                - Any other non-content structural elements
+            11. For each piece of text to be removed, provide its exact start and end positions
 
-            For example:
-            Given text: "The cat sat on the mat. The dog ran fast. Birds flew high in the sky."
-
-            Return on a valid JSON in the following exact format (no preface):
+            Return a valid JSON in the following exact format (no preface):
             {
                 "chunks": [
                     {
                         "startIndex": 1,
                         "endIndex": 23,
                         "firstWord": "The",
-                        "lastWord": "mat."
+                        "lastWord": "mat.",
+                        "cleanedText": "actual text without removed elements"
+                    }
+                ],
+                "textToRemove": [
+                    {
+                        "text": "Page 1",
+                        "startPosition": 1,
+                        "endPosition": 6
                     },
                     {
-                        "startIndex": 24,
-                        "endIndex": 41,
-                        "firstWord": "The",
-                        "lastWord": "fast."
-                    },
-                    {
-                        "startIndex": 42,
-                        "endIndex": 70,
-                        "firstWord": "Birds",
-                        "lastWord": "sky."
+                        "text": "-----------------",
+                        "startPosition": 7,
+                        "endPosition": 24
                     }
                 ]
             }`

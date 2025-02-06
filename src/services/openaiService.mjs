@@ -20,6 +20,75 @@ export async function processFile(content, type, maxChunkLength = OPENAI_SETTING
     }
 }
 
+function cleanText(text, textToRemove, originalText) {
+    let cleanedText = text;
+    const tolerance = OPENAI_SETTINGS.textRemovalPositionTolerance;
+
+    if (textToRemove && Array.isArray(textToRemove)) {
+        textToRemove.forEach(item => {
+            // Find the actual text at the specified position
+            const actualText = originalText.substring(item.startPosition - 1, item.endPosition);
+
+            // Verify the position accuracy within tolerance
+            if (actualText === item.text || 
+                (Math.abs(actualText.length - item.text.length) <= tolerance && 
+                 actualText.includes(item.text))) {
+                cleanedText = cleanedText.replace(new RegExp(escapeRegExp(item.text), 'g'), '');
+            } else {
+                console.warn(`Warning: Text "${item.text}" not found at specified position (${item.startPosition}-${item.endPosition}). Found "${actualText}" instead.`);
+            }
+        });
+        // Clean up extra whitespace and newlines
+        cleanedText = cleanedText.replace(/\s+/g, ' ').trim();
+    }
+    return cleanedText;
+}
+
+function escapeRegExp(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function createChunks(text, maxChunkLength) {
+    try {
+        const response = await openai.chat.completions.create({
+            model: OPENAI_SETTINGS.model,
+            messages: [
+                {
+                    role: OPENAI_PROMPTS.chunk.role,
+                    content: OPENAI_PROMPTS.chunk.content(maxChunkLength)
+                },
+                {
+                    role: "user",
+                    content: text
+                }
+            ],
+            ...(OPENAI_SETTINGS.model !== 'o1-preview' && {
+                response_format: { type: "json_object" }
+            })
+        });
+
+        const result = JSON.parse(response.choices[0].message.content);
+
+        // Process each chunk to have both original and cleaned versions
+        if (result.chunks && result.textToRemove) {
+            result.chunks = result.chunks.map(chunk => {
+                const originalText = text.slice(chunk.startIndex - 1, chunk.endIndex);
+                const cleanedText = cleanText(originalText, result.textToRemove, text);
+                return {
+                    ...chunk,
+                    originalText,
+                    cleanedText
+                };
+            });
+        }
+
+        result.warnings = validateChunks(result.chunks, text);
+        return result;
+    } catch (error) {
+        throw new Error(`Chunk creation failed: ${error.message}`);
+    }
+}
+
 async function summarizeContent(text) {
     try {
         const response = await openai.chat.completions.create({
@@ -56,39 +125,11 @@ async function analyzeSentiment(text) {
             ...(OPENAI_SETTINGS.model !== 'o1-preview' && {
                 response_format: { type: "json_object" }
             })
-
         });
 
         return JSON.parse(response.choices[0].message.content);
     } catch (error) {
         throw new Error(`Sentiment analysis failed: ${error.message}`);
-    }
-}
-
-async function createChunks(text, maxChunkLength) {
-    try {
-        const response = await openai.chat.completions.create({
-            model: OPENAI_SETTINGS.model,
-            messages: [
-                {
-                    role: OPENAI_PROMPTS.chunk.role,
-                    content: OPENAI_PROMPTS.chunk.content(maxChunkLength)
-                },
-                {
-                    role: "user",
-                    content: text
-                }
-            ],
-            ...(OPENAI_SETTINGS.model !== 'o1-preview' && {
-                response_format: { type: "json_object" }
-            })
-        });
-
-        const result = JSON.parse(response.choices[0].message.content);
-        result.warnings = validateChunks(result.chunks, text);
-        return result;
-    } catch (error) {
-        throw new Error(`Chunk creation failed: ${error.message}`);
     }
 }
 
