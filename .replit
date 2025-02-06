@@ -15,6 +15,10 @@ author = "agent"
 task = "workflow.run"
 args = "CLI Tool"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "CLI Tool Test"
+
 [[workflows.workflow]]
 name = "CLI Tool"
 author = "agent"
@@ -28,6 +32,20 @@ task = "packager.installForAll"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "cd /home/runner/workspace && node src/index.mjs process test.txt"
+
+[[workflows.workflow]]
+name = "CLI Tool Test"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "packager.installForAll"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd /home/runner/workspace && node src/index.mjs process test_remove.txt -t chunk"
 
 [deployment]
 run = ["sh", "-c", "cd /home/runner/workspace && node src/index.mjs process test.txt"]
