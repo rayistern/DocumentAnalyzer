@@ -1,8 +1,3 @@
-export const OPENAI_SETTINGS = {
-    model: "gpt-4o",  // newest model as of May 13, 2024
-    defaultMaxChunkLength: 2000,
-};
-
 export const OPENAI_PROMPTS = {
     summarize: {
         role: "system",
