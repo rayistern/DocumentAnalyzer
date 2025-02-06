@@ -1,15 +1,15 @@
 export const OPENAI_SETTINGS = {
-    model: "gpt-4o",  // newest model as of May 13, 2024
+    model: "o1-preview",  // newest model as of May 13, 2024
     defaultMaxChunkLength: 2000,
 };
 
 export const OPENAI_PROMPTS = {
     summarize: {
-        role: "system",
+        role: "user",
         content: "Summarize the following text and provide the result in JSON format with 'summary' and 'keyPoints' fields."
     },
     sentiment: {
-        role: "system",
+        role: "user",
         content: "Analyze the sentiment of the text and provide a JSON response with 'sentiment' (positive/negative/neutral), 'score' (1-5), and 'confidence' (0-1) fields."
     },
     chunk: {

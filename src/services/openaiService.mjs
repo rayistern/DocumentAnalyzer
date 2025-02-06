@@ -31,7 +31,9 @@ async function summarizeContent(text) {
                     content: text
                 }
             ],
-            response_format: { type: "json_object" }
+            ...(OPENAI_SETTINGS.model !== 'o1-preview' && {
+                response_format: { type: "json_object" }
+            })
         });
 
         return JSON.parse(response.choices[0].message.content);
@@ -51,7 +53,10 @@ async function analyzeSentiment(text) {
                     content: text
                 }
             ],
-            response_format: { type: "json_object" }
+            ...(OPENAI_SETTINGS.model !== 'o1-preview' && {
+                response_format: { type: "json_object" }
+            })
+
         });
 
         return JSON.parse(response.choices[0].message.content);
@@ -66,7 +71,7 @@ async function createChunks(text, maxChunkLength) {
             model: OPENAI_SETTINGS.model,
             messages: [
                 {
-                    role: "system",
+                    role: OPENAI_PROMPTS.chunk.role,
                     content: OPENAI_PROMPTS.chunk.content(maxChunkLength)
                 },
                 {
@@ -74,7 +79,9 @@ async function createChunks(text, maxChunkLength) {
                     content: text
                 }
             ],
-            response_format: { type: "json_object" }
+            ...(OPENAI_SETTINGS.model !== 'o1-preview' && {
+                response_format: { type: "json_object" }
+            })
         });
 
         const result = JSON.parse(response.choices[0].message.content);
@@ -92,20 +99,32 @@ function validateChunks(chunks, originalText) {
     chunks.forEach((chunk, index) => {
         // Check for gaps between chunks
         if (chunk.startIndex !== previousEndIndex + 1 && index > 0) {
-            warnings.push(`Gap detected between chunk ${index} and ${index + 1}`);
+            const gapText = originalText.slice(previousEndIndex, chunk.startIndex - 1);
+            warnings.push(`Gap detected between chunk ${index} and ${index + 1}. Gap content: "${gapText}"`);
         }
 
-        // Verify chunk content matches original text
-        const extractedContent = originalText.slice(chunk.startIndex - 1, chunk.endIndex);
-        if (!extractedContent.startsWith(chunk.firstWord)) {
-            warnings.push(`Chunk ${index + 1} first word mismatch: ${chunk.firstWord}`);
+        // Check for sentence boundaries
+        const chunkText = originalText.slice(chunk.startIndex - 1, chunk.endIndex);
+        const endsWithPeriod = chunkText.trim().match(/[.!?]$/);
+
+        if (!endsWithPeriod) {
+            warnings.push(`Chunk ${index + 1} does not end with a sentence break: "${chunkText}"`);
         }
-        if (!extractedContent.endsWith(chunk.lastWord)) {
-            warnings.push(`Chunk ${index + 1} last word mismatch: ${chunk.lastWord}`);
+
+        // Verify chunk size
+        const chunkLength = chunk.endIndex - chunk.startIndex + 1;
+        if (chunkLength > OPENAI_SETTINGS.defaultMaxChunkLength) {
+            warnings.push(`Chunk ${index + 1} exceeds maximum length (${chunkLength} > ${OPENAI_SETTINGS.defaultMaxChunkLength})`);
         }
 
         previousEndIndex = chunk.endIndex;
     });
+
+    // Check if we processed the entire text
+    if (previousEndIndex < originalText.length) {
+        const remainingText = originalText.slice(previousEndIndex);
+        warnings.push(`Unprocessed text remaining: "${remainingText}"`);
+    }
 
     return warnings;
 }
