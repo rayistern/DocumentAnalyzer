@@ -20,3 +20,16 @@ export const chunks = pgTable('chunks', {
   content: text('content').notNull(),
   createdAt: timestamp('created_at').defaultNow()
 });
+
+export const llmResponses = pgTable('llm_responses', {
+  id: serial('id').primaryKey(),
+  documentId: integer('document_id').references(() => documents.id),
+  prompt: text('prompt').notNull(),
+  response: jsonb('response').notNull(), // Store the complete OpenAI response
+  model: varchar('model', { length: 50 }).notNull(),
+  totalTokens: integer('total_tokens'),
+  promptTokens: integer('prompt_tokens'),
+  completionTokens: integer('completion_tokens'),
+  latencyMs: integer('latency_ms'),
+  createdAt: timestamp('created_at').defaultNow()
+});
