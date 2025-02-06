@@ -1,18 +1,62 @@
 import OpenAI from 'openai';
+import { openAILogger as logger } from './loggingService.mjs';
+import { logLLMResponse } from './dbService.mjs';
 
-// the newest OpenAI model is "gpt-4o" which was released May 13, 2024. do not change this unless explicitly requested by the user
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY
 });
 
-export async function processFile(content, type) {
+export async function processFile(content, type, documentId = null) {
+    const startTime = Date.now();
     try {
+        let result;
         if (type === 'sentiment') {
-            return await analyzeSentiment(content);
+            result = await analyzeSentiment(content);
         } else {
-            return await summarizeContent(content);
+            result = await summarizeContent(content);
         }
+
+        const processingTime = Date.now() - startTime;
+
+        // Log to both file and database
+        await logger.info('OpenAI processing completed', {
+            type,
+            processingTime,
+            contentLength: content.length,
+            response: result
+        });
+
+        await logLLMResponse({
+            requestType: type,
+            inputText: content,
+            response: result,
+            model: "gpt-4o",
+            processingTime,
+            documentId,
+            status: 'success'
+        });
+
+        return result;
     } catch (error) {
+        const processingTime = Date.now() - startTime;
+
+        await logger.error('OpenAI processing failed', error, {
+            type,
+            processingTime,
+            contentLength: content.length
+        });
+
+        // Log failed attempts as well
+        await logLLMResponse({
+            requestType: type,
+            inputText: content,
+            response: { error: error.message },
+            model: "gpt-4o",
+            processingTime,
+            documentId,
+            status: 'error'
+        });
+
         throw new Error(`OpenAI processing failed: ${error.message}`);
     }
 }
@@ -34,7 +78,7 @@ async function summarizeContent(text) {
             response_format: { type: "json_object" }
         });
 
-        return JSON.parse(response.choices[0].message.content);
+        return response.choices[0].message.content;
     } catch (error) {
         throw new Error(`Summarization failed: ${error.message}`);
     }
@@ -57,7 +101,7 @@ async function analyzeSentiment(text) {
             response_format: { type: "json_object" }
         });
 
-        return JSON.parse(response.choices[0].message.content);
+        return response.choices[0].message.content;
     } catch (error) {
         throw new Error(`Sentiment analysis failed: ${error.message}`);
     }
