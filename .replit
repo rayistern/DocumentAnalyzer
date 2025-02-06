@@ -1,4 +1,4 @@
-modules = ["nodejs-20", "postgresql-16", "python-3.11"]
+modules = ["nodejs-20", "postgresql-16"]
 
 [nix]
 channel = "stable-24_05"
@@ -27,7 +27,7 @@ task = "packager.installForAll"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cd /home/runner/workspace && node src/index.mjs process test.txt -t chunk && node src/index.mjs validation-logs"
+args = "cd /home/runner/workspace && node src/index.mjs process test.txt"
 
 [deployment]
-run = ["sh", "-c", "cd /home/runner/workspace && node src/index.mjs process test.txt -t chunk && node src/index.mjs validation-logs"]
+run = ["sh", "-c", "cd /home/runner/workspace && node src/index.mjs process test.txt"]
