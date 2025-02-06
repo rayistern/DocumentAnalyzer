@@ -1,7 +1,7 @@
 import { drizzle } from 'drizzle-orm/node-postgres';
 import pkg from 'pg';
 const { Pool } = pkg;
-import { documents, chunks } from '../schema.mjs';
+import { documents, chunks, apiLogs, chunkValidationLogs } from '../schema.mjs';
 import { eq } from 'drizzle-orm';
 
 const pool = new Pool({
@@ -70,6 +70,26 @@ export async function getResults() {
     }
 }
 
+export async function getRecentValidationLogs() {
+    try {
+        const logs = await db.select()
+            .from(chunkValidationLogs)
+            .orderBy(chunkValidationLogs.createdAt, 'desc')
+            .limit(10);
+
+        return logs.map(log => ({
+            chunkIndex: log.chunkIndex,
+            expectedBoundary: `"${log.expectedFirstWord}" to "${log.expectedLastWord}"`,
+            actualBoundary: `"${log.actualFirstWord}" to "${log.actualLastWord}"`,
+            chunkText: log.chunkText,
+            error: log.validationError,
+            passed: log.validationPassed
+        }));
+    } catch (error) {
+        throw new Error(`Failed to get validation logs: ${error.message}`);
+    }
+}
+
 export async function getDocumentChunks(documentId) {
     try {
         return await db.select()
@@ -77,5 +97,24 @@ export async function getDocumentChunks(documentId) {
             .where(eq(chunks.documentId, documentId));
     } catch (error) {
         throw new Error(`Database error: ${error.message}`);
+    }
+}
+
+export async function getRecentApiLogs() {
+    try {
+        const logs = await db.select()
+            .from(apiLogs)
+            .orderBy(apiLogs.createdAt, 'desc')
+            .limit(5);
+
+        return logs.map(log => ({
+            requestType: log.requestType,
+            success: log.success,
+            error: log.error,
+            requestPayload: JSON.stringify(log.requestPayload, null, 2),
+            responsePayload: JSON.stringify(log.responsePayload, null, 2)
+        }));
+    } catch (error) {
+        throw new Error(`Failed to get API logs: ${error.message}`);
     }
 }

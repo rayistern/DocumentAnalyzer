@@ -3,7 +3,7 @@
 import { Command } from 'commander';
 import dotenv from 'dotenv';
 import { processFile } from './services/openaiService.mjs';
-import { saveResult, getResults, getDocumentChunks } from './services/storageService.mjs';
+import { saveResult, getResults, getRecentValidationLogs, getRecentApiLogs } from './services/storageService.mjs';
 import { readTextFile } from './utils/fileReader.mjs';
 
 dotenv.config();
@@ -27,10 +27,16 @@ program
             const content = await readTextFile(filepath);
 
             console.log('Processing with OpenAI...');
-            const result = await processFile(content, options.type, options.maxChunkLength);
+            const result = await processFile(content, options.type, parseInt(options.maxChunkLength));
+
+            if (result.error) {
+                console.error('Processing failed:');
+                console.error(result.error);
+                process.exit(1);
+            }
 
             console.log('Storing result...');
-            const savedResult = await saveResult({
+            await saveResult({
                 filepath,
                 type: options.type,
                 content: result
@@ -50,7 +56,7 @@ program
         try {
             const results = await getResults();
             console.log('Processed Documents:');
-            Object.values(results).forEach(doc => {
+            for (const doc of Object.values(results)) {
                 console.log(`\nDocument: ${doc.filepath}`);
                 console.log(`Total Length: ${doc.totalLength}`);
                 console.log(`Created: ${doc.createdAt}`);
@@ -58,6 +64,51 @@ program
                 doc.chunks.forEach((chunk, i) => {
                     console.log(`  ${i + 1}. ${chunk.firstWord}...${chunk.lastWord} (${chunk.endIndex - chunk.startIndex} chars)`);
                 });
+            }
+        } catch (error) {
+            console.error('Error:', error.message);
+            process.exit(1);
+        }
+    });
+
+program
+    .command('validation-logs')
+    .description('Show recent chunk validation failures')
+    .action(async () => {
+        try {
+            const logs = await getRecentValidationLogs();
+            console.log('\nRecent Chunk Validation Results:');
+            logs.forEach((log, i) => {
+                console.log(`\nChunk #${log.chunkIndex}:`);
+                console.log(`Expected: ${log.expectedBoundary}`);
+                console.log(`Actual:   ${log.actualBoundary}`);
+                if (!log.passed) {
+                    console.log('Error:', log.error);
+                    console.log('Problem chunk:', log.chunkText);
+                }
+            });
+        } catch (error) {
+            console.error('Error:', error.message);
+            process.exit(1);
+        }
+    });
+
+program
+    .command('api-logs')
+    .description('Show recent API calls and their results')
+    .action(async () => {
+        try {
+            const logs = await getRecentApiLogs();
+            console.log('\nRecent API Calls:');
+            logs.forEach((log, i) => {
+                console.log(`\nCall #${i + 1}:`);
+                console.log(`Type: ${log.requestType}`);
+                console.log(`Success: ${log.success}`);
+                if (!log.success) {
+                    console.log('Error:', log.error);
+                }
+                console.log('Request:', log.requestPayload);
+                console.log('Response:', log.responsePayload);
             });
         } catch (error) {
             console.error('Error:', error.message);
