@@ -27,7 +27,7 @@ task = "packager.installForAll"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cd /home/runner/workspace && node --experimental-modules src/index.mjs process test.txt"
+args = "cd /home/runner/workspace && node src/index.mjs process test.txt"
 
 [deployment]
-run = ["sh", "-c", "cd /home/runner/workspace && node --experimental-modules src/index.mjs process test.txt"]
+run = ["sh", "-c", "cd /home/runner/workspace && node src/index.mjs process test.txt"]
