@@ -122,8 +122,9 @@ export async function getRecentApiLogs() {
             requestType: log.requestType,
             success: log.success,
             error: log.error,
-            requestPayload: JSON.stringify(log.requestPayload, null, 2),
-            responsePayload: JSON.stringify(log.responsePayload, null, 2)
+            requestPayload: log.requestPayload,
+            responsePayload: log.responsePayload,
+            parsed: log.responsePayload?.parsed
         }));
     } catch (error) {
         throw new Error(`Failed to get API logs: ${error.message}`);

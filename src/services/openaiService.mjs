@@ -16,37 +16,27 @@ const db = drizzle(pool);
 
 async function logApiCall(requestType, requestPayload, responsePayload, success, error = null) {
     try {
+        const rawResponse = responsePayload?.choices?.[0]?.message?.content || null;
+        let parsedResponse = null;
+        try {
+            parsedResponse = rawResponse ? JSON.parse(rawResponse) : null;
+        } catch (e) {
+            console.error('Failed to parse response:', e);
+        }
+
         await db.insert(apiLogs).values({
             requestType,
             requestPayload,
-            responsePayload,
+            responsePayload: {
+                raw: rawResponse,
+                parsed: parsedResponse,
+                fullResponse: responsePayload
+            },
             success,
-            error: error?.message
+            error: error?.message || null
         });
     } catch (e) {
         console.error('Failed to log API call:', e);
-    }
-}
-
-async function logChunkValidation(documentId, chunkIndex, expected, actual, chunkText, passed, error = null, fullText = '', startIndex = 0, endIndex = 0) {
-    try {
-        const followingContext = fullText.substring(endIndex, endIndex + 5);
-        await db.insert(chunkValidationLogs).values({
-            documentId,
-            chunkIndex,
-            startIndex,
-            endIndex,
-            expectedFirstWord: expected.first,
-            expectedLastWord: expected.last,
-            actualFirstWord: actual.first,
-            actualLastWord: actual.last,
-            chunkText,
-            followingContext,
-            validationPassed: passed,
-            validationError: error?.message
-        });
-    } catch (e) {
-        console.error('Failed to log chunk validation:', e);
     }
 }
 
@@ -62,14 +52,52 @@ async function logAppEvent(level, message, metadata = null) {
     }
 }
 
-export async function processFile(content, type, maxChunkLength = 2000) {
+async function logChunkValidation(documentId, chunkIndex, expected, actual, chunkText, passed, error = null, fullText = '', startIndex = 0, endIndex = 0) {
+    try {
+        const afterContext = fullText.substring(endIndex, Math.min(fullText.length, endIndex + 100));
+        const beforeContext = fullText.substring(Math.max(0, startIndex - 100), startIndex);
+
+        await db.insert(chunkValidationLogs).values({
+            documentId,
+            chunkIndex,
+            startIndex,
+            endIndex,
+            expectedFirstWord: expected.first,
+            expectedLastWord: expected.last,
+            actualFirstWord: actual.first,
+            actualLastWord: actual.last,
+            chunkText,
+            followingContext: afterContext,
+            validationPassed: passed,
+            validationError: error?.message || null
+        });
+
+        await logAppEvent('debug', 'Chunk validation details', {
+            chunkIndex,
+            beforeContext,
+            chunk: chunkText,
+            afterContext,
+            expected,
+            actual,
+            error: error?.message,
+            textAround: {
+                before: beforeContext,
+                after: afterContext
+            }
+        });
+    } catch (e) {
+        console.error('Failed to log chunk validation:', e);
+    }
+}
+
+export async function processFile(text, type, maxChunkLength = 2000) {
     try {
         if (type === 'sentiment') {
-            return await analyzeSentiment(content);
+            return await analyzeSentiment(text);
         } else if (type === 'chunk') {
-            return await chunkContent(content, parseInt(maxChunkLength));
+            return await chunkContent(text, parseInt(maxChunkLength));
         } else {
-            return await summarizeContent(content);
+            return await summarizeContent(text);
         }
     } catch (error) {
         await logAppEvent('error', `File processing failed: ${error.message}`, { type, error: error.message });
@@ -83,23 +111,43 @@ async function chunkContent(text, maxChunkLength = 2000) {
         messages: [
             {
                 role: "system",
-                content: `Analyze the following text and identify natural chunk boundaries following these rules:
-                1. Each chunk MUST end at complete sentences or natural thought boundaries
-                2. Chunks MUST NOT cut words in half
-                3. Keep chunks under ${maxChunkLength} characters
-                4. Record the exact first and last complete words of each chunk
+                content: `Break the following text into chunks, following these STRICT rules:
 
-                Return a JSON object with:
-                {
-                    "chunks": [
-                        {
-                            "startIndex": <number>,
-                            "endIndex": <number>,
-                            "firstWord": "exact first word",
-                            "lastWord": "exact last word"
-                        }
-                    ]
-                }`
+1. Each chunk MUST end with a complete sentence followed by whitespace or end of text
+   - Valid sentence endings are: period, exclamation mark, or question mark
+   - The ending punctuation must be followed by a space, newline, or end of text
+
+2. Word boundary rules:
+   - NEVER split in the middle of a word
+   - Each chunk must start and end with complete words
+   - Before starting a chunk, ensure there's whitespace or start of text
+   - After ending a chunk, ensure there's whitespace or end of text
+
+3. Additional requirements:
+   - Maximum chunk length: ${maxChunkLength} characters
+   - Use zero-based indexing for all positions
+   - Include ending punctuation in the last word
+
+Example 1:
+Text: "This is a test. Second sentence here."
+Valid chunk: { startIndex: 0, endIndex: 15, firstWord: "This", lastWord: "test." }
+
+Example 2:
+Text: "Hello world! Next part."
+Valid chunk: { startIndex: 0, endIndex: 12, firstWord: "Hello", lastWord: "world!" }
+Invalid: { startIndex: 0, endIndex: 5, firstWord: "Hello", lastWord: "wo" } // Splits "world"
+
+Return JSON:
+{
+    "chunks": [
+        {
+            "startIndex": <number>,     // Position where chunk starts (0-based)
+            "endIndex": <number>,       // Position where chunk ends (0-based)
+            "firstWord": "exact word",  // First complete word in chunk
+            "lastWord": "exact word"    // Last complete word with punctuation
+        }
+    ]
+}`
             },
             {
                 role: "user",
@@ -115,13 +163,34 @@ async function chunkContent(text, maxChunkLength = 2000) {
 
         const result = JSON.parse(response.choices[0].message.content);
 
-        // Validate chunks
+        await logAppEvent('info', 'Received chunk response', { 
+            response: response.choices[0].message.content,
+            parsed: result
+        });
+
         const chunks = result.chunks || [];
         for (let i = 0; i < chunks.length; i++) {
             const chunk = chunks[i];
-            const chunkText = text.slice(chunk.startIndex, chunk.endIndex);
 
-            // Clean and split the chunk text
+            // Validate and convert indexes
+            chunk.startIndex = Number(chunk.startIndex);
+            chunk.endIndex = Number(chunk.endIndex);
+
+            if (isNaN(chunk.startIndex) || isNaN(chunk.endIndex)) {
+                throw new Error(`Invalid indexes in chunk ${i}: start=${chunk.startIndex}, end=${chunk.endIndex}`);
+            }
+
+            // Extract the chunk text and analyze boundaries
+            const chunkText = text.slice(chunk.startIndex, chunk.endIndex);
+            const prevChar = chunk.startIndex > 0 ? text[chunk.startIndex - 1] : '';
+            const nextChar = chunk.endIndex < text.length ? text[chunk.endIndex] : '';
+
+            // Check word boundaries
+            const hasValidStart = chunk.startIndex === 0 || /\s/.test(prevChar);
+            const hasValidEnd = chunk.endIndex === text.length || /\s/.test(nextChar);
+            const endsWithSentence = /[.!?][\s\n]*$/.test(chunkText);
+
+            // Get actual first and last words
             const words = chunkText.trim().split(/\s+/);
             const actualFirstWord = words[0];
             const actualLastWord = words[words.length - 1];
@@ -129,47 +198,68 @@ async function chunkContent(text, maxChunkLength = 2000) {
             const expected = { first: chunk.firstWord, last: chunk.lastWord };
             const actual = { first: actualFirstWord, last: actualLastWord };
 
-            const validationPassed = actualFirstWord === chunk.firstWord && 
+            // Detailed validation logging
+            await logAppEvent('debug', `Chunk ${i} validation`, {
+                indexes: { start: chunk.startIndex, end: chunk.endIndex },
+                text: chunkText,
+                boundaries: {
+                    prevChar,
+                    nextChar,
+                    hasValidStart,
+                    hasValidEnd,
+                    endsWithSentence
+                },
+                words: {
+                    expected,
+                    actual,
+                    allWords: words
+                }
+            });
+
+            // Comprehensive validation
+            const validationPassed = actualFirstWord === chunk.firstWord &&
                                    actualLastWord === chunk.lastWord &&
                                    chunkText.length <= maxChunkLength &&
-                                   /[.!?][\s]*$/.test(chunkText.trim());
+                                   hasValidStart &&
+                                   hasValidEnd &&
+                                   endsWithSentence;
 
             let validationError = null;
             if (!validationPassed) {
-                if (actualFirstWord !== chunk.firstWord) {
-                    validationError = `First word mismatch at index ${chunk.startIndex}: AI claimed "${chunk.firstWord}" but actual text starts with "${actualFirstWord}"`;
+                if (!hasValidStart || !hasValidEnd) {
+                    validationError = new Error(`Chunk boundaries split a word: prevChar="${prevChar}", nextChar="${nextChar}"`);
+                } else if (actualFirstWord !== chunk.firstWord) {
+                    validationError = new Error(`First word mismatch at index ${chunk.startIndex}: AI claimed "${chunk.firstWord}" but found "${actualFirstWord}"`);
                 } else if (actualLastWord !== chunk.lastWord) {
-                    validationError = `Last word mismatch at index ${chunk.endIndex}: AI claimed "${chunk.lastWord}" but actual text ends with "${actualLastWord}"`;
+                    validationError = new Error(`Last word mismatch at index ${chunk.endIndex}: AI claimed "${chunk.lastWord}" but found "${actualLastWord}"`);
                 } else if (chunkText.length > maxChunkLength) {
-                    validationError = `Chunk at index ${chunk.startIndex}-${chunk.endIndex} exceeds maximum length of ${maxChunkLength} characters (actual: ${chunkText.length})`;
-                } else if (!/[.!?][\s]*$/.test(chunkText.trim())) {
-                    validationError = `Chunk at index ${chunk.startIndex}-${chunk.endIndex} does not end with a complete sentence`;
+                    validationError = new Error(`Chunk exceeds maximum length of ${maxChunkLength} characters (actual: ${chunkText.length})`);
+                } else if (!endsWithSentence) {
+                    validationError = new Error(`Chunk does not end with a complete sentence`);
                 }
             }
 
             await logChunkValidation(
-                null, // documentId will be set later
+                null,
                 i,
                 expected,
                 actual,
                 chunkText,
                 validationPassed,
-                validationError ? new Error(validationError) : null,
+                validationError,
                 text,
                 chunk.startIndex,
                 chunk.endIndex
             );
 
             if (!validationPassed) {
-                const error = new Error(validationError);
-                await logApiCall('chunk', requestPayload, result, false, error);
-                throw error;
+                await logApiCall('chunk', requestPayload, response, false, validationError);
+                throw validationError;
             }
         }
 
         return {
             totalLength: text.length,
-            chunkCount: chunks.length,
             chunks: chunks
         };
     } catch (error) {

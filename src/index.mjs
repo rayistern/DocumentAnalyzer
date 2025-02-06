@@ -77,25 +77,66 @@ program
     .action(async () => {
         try {
             const logs = await getRecentValidationLogs();
+            const apiLogs = await getRecentApiLogs();
+
             console.log('\nRecent Chunk Validation Results:');
             logs.forEach((log, i) => {
-                console.log(`\nChunk #${log.chunkIndex}:`);
-                console.log(`Indexes: ${log.indexes.start} to ${log.indexes.end}`);
-                console.log('Expected boundaries:');
-                console.log(`  First word: "${log.expected.firstWord}"`);
-                console.log(`  Last word: "${log.expected.lastWord}"`);
-                console.log('Actual boundaries:');
-                console.log(`  First word: "${log.actual.firstWord}"`);
-                console.log(`  Last word: "${log.actual.lastWord}"`);
-                console.log('Full chunk text:');
-                console.log(`  "${log.chunkText}"`);
+                console.log('\n' + '='.repeat(80));
+                console.log(`CHUNK #${log.chunkIndex}:`);
+                console.log('='.repeat(80));
+
+                console.log('\nINDEXES FROM AI:');
+                console.log(`Start: ${log.indexes.start}`);
+                console.log(`End: ${log.indexes.end}`);
+                console.log(`Length: ${log.indexes.end - log.indexes.start} characters`);
+
+                console.log('\nEXPECTED BOUNDARIES (from AI):');
+                console.log(`First word: "${log.expected.firstWord}"`);
+                console.log(`Last word: "${log.expected.lastWord}"`);
+
+                console.log('\nACTUAL TEXT FOUND:');
+                console.log(`First word: "${log.actual.firstWord}"`);
+                console.log(`Last word: "${log.actual.lastWord}"`);
+
+                console.log('\nFULL CHUNK TEXT:');
+                // Add quotes and show exact characters
+                console.log('"""\n' + log.chunkText + '\n"""');
+
                 if (log.followingContext) {
-                    console.log(`Next 5 chars: "${log.followingContext}"`);
+                    console.log('\nNEXT CHARACTERS (showing exact breaks):');
+                    // Show exact characters including newlines etc
+                    const contextDisplay = log.followingContext
+                        .replace(/\n/g, '\\n')
+                        .replace(/\r/g, '\\r')
+                        .replace(/\t/g, '\\t');
+                    console.log(`"${contextDisplay}"`);
                 }
+
                 if (!log.passed) {
-                    console.log('Error:', log.error);
+                    console.log('\nVALIDATION ERROR:');
+                    console.log(log.error);
                 }
-                console.log('-'.repeat(80));
+
+                // Find and display the full AI response
+                const apiLog = apiLogs.find(al => 
+                    al.requestType === 'chunk' && 
+                    al.responsePayload?.parsed?.chunks?.some(c => 
+                        c.startIndex === log.indexes.start && 
+                        c.endIndex === log.indexes.end
+                    )
+                );
+
+                console.log('\nFULL AI INTERACTION:');
+                if (apiLog) {
+                    console.log('\nREQUEST:');
+                    console.log(JSON.stringify(apiLog.requestPayload, null, 2));
+                    console.log('\nRESPONSE:');
+                    console.log(JSON.stringify(apiLog.responsePayload, null, 2));
+                } else {
+                    console.log('(No matching API log found)');
+                }
+
+                console.log('\n' + '='.repeat(80));
             });
         } catch (error) {
             console.error('Error:', error.message);
