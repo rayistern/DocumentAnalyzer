@@ -25,7 +25,7 @@ export async function saveResult(result) {
 
             // Save all chunks with their content
             const chunkPromises = content.chunks.map(chunk => {
-                const chunkContent = content.substring(chunk.startIndex, chunk.endIndex + 1); // +1 to include the period.  Corrected the 'text' error here.
+                const chunkContent = content.substring(chunk.startIndex, chunk.endIndex);
                 return db.insert(chunks)
                     .values({
                         documentId: document.id,
