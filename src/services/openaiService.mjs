@@ -33,14 +33,16 @@ async function chunkContent(text, maxChunkLength = 2000) {
                     1. Decide each chunk according to natural thought or thematic boundaries
                     2. Chunks MUST NOT cut words in half
                     3. Keep chunks under ${maxChunkLength} characters
-                    4. Record the first and last complete words of each chunk, including any surrounding whitespace
+                    4. Record the exact first and last complete words of each chunk
                     5. The first chunk MUST start at index 1
                     6. Each subsequent chunk MUST start at one character beyond the index where the previous chunk ended
                     7. There MUST NOT be any overlaps between chunks
                     8. Include punctuation
-                    9. Each chunk should end with a complete sentence
 
-                    Return a valid JSON in the following exact format. Do not include any preface that this is a json:
+                    For example:
+                    Given text: "The cat sat. The dog ran. Birds flew high in the sky. Trees swayed gently."
+
+                    Return on a valid JSON in the following exact format. Do not include any preface that this is a json:
                     {
                         "chunks": [
                             {
@@ -48,6 +50,18 @@ async function chunkContent(text, maxChunkLength = 2000) {
                                 "endIndex": 12,
                                 "firstWord": "The",
                                 "lastWord": "sat."
+                            },
+                            {
+                                "startIndex": 13,
+                                "endIndex": 25,
+                                "firstWord": " The",
+                                "lastWord": "ran."
+                            },
+                            {
+                                "startIndex": 26,
+                                "endIndex": 53,
+                                "firstWord": " Birds",
+                                "lastWord": "sky."
                             }
                         ]
                     }`
