@@ -1,10 +1,10 @@
 import { pgTable, serial, text, integer, timestamp, varchar } from "drizzle-orm/pg-core";
 
-// Define tables
 export const documents = pgTable('documents', {
   id: serial('id').primaryKey(),
   filepath: varchar('filepath', { length: 255 }).notNull(),
   totalLength: integer('total_length').notNull(),
+  warnings: text('warnings'),  // New field for storing validation warnings
   createdAt: timestamp('created_at').defaultNow()
 });
 

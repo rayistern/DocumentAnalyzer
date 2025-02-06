@@ -12,20 +12,20 @@ const db = drizzle(pool);
 
 export async function saveResult(result) {
     try {
-        const { filepath, type, content } = result;
+        const { filepath, type, content, originalText, warnings = [] } = result;
 
         if (type === 'chunk') {
-            // Save document first
+            // Save document first with warnings
             const [document] = await db.insert(documents)
                 .values({
                     filepath,
-                    totalLength: content.totalLength
+                    totalLength: content.totalLength,
+                    warnings: warnings.join('\n')  // Store warnings as newline-separated string
                 })
                 .returning();
 
             // Save all chunks with their content
             const chunkPromises = content.chunks.map(chunk => {
-                const chunkContent = content.substring(chunk.startIndex, chunk.endIndex);
                 return db.insert(chunks)
                     .values({
                         documentId: document.id,
@@ -33,7 +33,7 @@ export async function saveResult(result) {
                         endIndex: chunk.endIndex,
                         firstWord: chunk.firstWord,
                         lastWord: chunk.lastWord,
-                        content: chunkContent
+                        content: originalText.slice(chunk.startIndex - 1, chunk.endIndex)
                     });
             });
 

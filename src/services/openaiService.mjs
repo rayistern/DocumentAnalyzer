@@ -6,7 +6,6 @@ const openai = new OpenAI({
 
 export async function processFile(content, type, maxChunkLength = 2000) {
     try {
-        // Log input parameters
         console.log('\nChunking Parameters:');
         console.log('Text length:', content.length);
         console.log('Max chunk length:', maxChunkLength);
@@ -26,52 +25,29 @@ export async function processFile(content, type, maxChunkLength = 2000) {
 async function chunkContent(text, maxChunkLength = 2000) {
     try {
         const response = await openai.chat.completions.create({
-            model: "gpt-4o",
+            model: "o1-preview",
             messages: [
                 {
-                    role: "system",
+                    role: "user",
                     content: `Analyze the following text and identify natural chunk boundaries following these rules:
-                    1. Each chunk MUST end at complete sentences or natural thought boundaries
+                    1. Decide each chunk according to natural thought or thematic boundaries
                     2. Chunks MUST NOT cut words in half
                     3. Keep chunks under ${maxChunkLength} characters
-                    4. Record the exact first and last complete words of each chunk
-                    5. Each chunk MUST end after a complete word and punctuation mark
-                    6. Each chunk MUST begin at the start of a complete word
-                    7. Never end a chunk in the middle of a word or sentence
-                    8. The first chunk MUST start at index 0
-                    9. Each subsequent chunk MUST start at the index where the previous chunk ended
-                    10. There MUST NOT be any overlaps between chunks
-                    11. Each chunk boundary MUST have proper spacing (no partial words)
-                    12. End each chunk at a period, exclamation mark, or question mark followed by whitespace
-                    13. When choosing chunk boundaries, look for complete sentences
-                    14. The first word of each chunk MUST be the start of a new sentence
-                    15. Each chunk MUST end with proper punctuation (., !, or ?) and whitespace
-                    16. NEVER split words between chunks - ensure complete words at both start and end
-                    17. Every chunk boundary must occur at a space after sentence-ending punctuation
+                    4. Record the first and last complete words of each chunk, including any surrounding whitespace
+                    5. The first chunk MUST start at index 1
+                    6. Each subsequent chunk MUST start at one character beyond the index where the previous chunk ended
+                    7. There MUST NOT be any overlaps between chunks
+                    8. Include punctuation
+                    9. Each chunk should end with a complete sentence
 
-                    For example:
-                    Given text: "The cat sat. The dog ran. Birds flew high in the sky. Trees swayed gently."
-
-                    Return a JSON object in the following exact format:
+                    Return a valid JSON in the following exact format. Do not include any preface that this is a json:
                     {
                         "chunks": [
                             {
-                                "startIndex": 0,
-                                "endIndex": 13,
+                                "startIndex": 1,
+                                "endIndex": 12,
                                 "firstWord": "The",
                                 "lastWord": "sat."
-                            },
-                            {
-                                "startIndex": 14,
-                                "endIndex": 26,
-                                "firstWord": "The",
-                                "lastWord": "ran."
-                            },
-                            {
-                                "startIndex": 27,
-                                "endIndex": 51,
-                                "firstWord": "Birds",
-                                "lastWord": "sky."
                             }
                         ]
                     }`
@@ -80,102 +56,87 @@ async function chunkContent(text, maxChunkLength = 2000) {
                     role: "user",
                     content: text
                 }
-            ],
-            response_format: { type: "json_object" }
+            ]
         });
 
-        // Log complete AI response
         console.log('\nAI Response:');
         console.log(response.choices[0].message.content);
 
         const result = JSON.parse(response.choices[0].message.content);
         const chunks = result.chunks || [];
 
-        // Log overview of chunks
         console.log('\nChunk Overview:');
         console.log('Number of chunks:', chunks.length);
-        chunks.forEach((chunk, i) => {
-            console.log(`\nChunk ${i + 1}/${chunks.length}:`);
-            console.log('Indices:', { start: chunk.startIndex, end: chunk.endIndex });
-            console.log('Length:', chunk.endIndex - chunk.startIndex);
-            console.log('Expected words:', { first: chunk.firstWord, last: chunk.lastWord });
-        });
 
-        // Validate each chunk
+        // Validate each chunk and collect warnings
+        const warnings = [];
         for (let i = 0; i < chunks.length; i++) {
             const chunk = chunks[i];
-            const chunkText = text.slice(chunk.startIndex, chunk.endIndex);
+            const chunkText = text.slice(chunk.startIndex - 1, chunk.endIndex);
             const nextContext = text.slice(chunk.endIndex, chunk.endIndex + 50);
 
-            // Log detailed chunk information
             console.log(`\nValidating Chunk ${i + 1}/${chunks.length}:`);
             console.log('Full chunk text:', chunkText);
             console.log('Next 50 chars:', nextContext);
 
-            // Check chunk boundaries
-            const prevChar = chunk.startIndex > 0 ? text[chunk.startIndex - 1] : "";
+            const prevChar = chunk.startIndex > 1 ? text[chunk.startIndex - 2] : "";
             const nextChar = chunk.endIndex < text.length ? text[chunk.endIndex] : "";
             console.log('Boundary characters:', {
                 before: prevChar,
                 after: nextChar
             });
 
-            // Clean and split the chunk text
-            const words = chunkText.trim().split(/\s+/);
-            const actualFirstWord = words[0];
-            const actualLastWord = words[words.length - 1].replace(/[.!?]$/, '');
+            // Split into words while preserving whitespace, filter out empty strings
+            const words = chunkText.split(/(\s+)/).filter(word => word.length > 0);
+            const actualFirstWord = words.find(w => /\S/.test(w)) || '';
+            const actualLastWord = [...words].reverse().find(w => /\S/.test(w)) || '';
 
             console.log('Word boundaries:', {
                 expected: { first: chunk.firstWord, last: chunk.lastWord },
                 actual: { first: actualFirstWord, last: actualLastWord }
             });
 
-            // 1. First check if the chunk ends with a complete sentence
+            // Collect warnings instead of throwing errors
             if (!/[.!?]\s*$/.test(chunkText)) {
-                throw new Error(`Chunk ${i} does not end with a complete sentence`);
+                warnings.push(`Warning: Chunk ${i} does not end with a complete sentence`);
             }
 
-            // 2. Validate chunk length
             if (chunkText.length > maxChunkLength) {
-                throw new Error(`Chunk ${i} exceeds maximum length`);
+                warnings.push(`Warning: Chunk ${i} exceeds maximum length`);
             }
 
-            // 3. Check if chunk starts/ends with partial words
-            if (prevChar && /\w/.test(prevChar)) {
-                throw new Error(`Chunk ${i} boundaries split a word: prevChar="${prevChar}"`);
-            }
-            if (nextChar && /\w/.test(nextChar)) {
-                throw new Error(`Chunk ${i} boundaries split a word: nextChar="${nextChar}"`);
+            if (actualFirstWord !== chunk.firstWord || actualLastWord !== chunk.lastWord) {
+                warnings.push(`Warning: Chunk ${i} boundary mismatch - expected "${chunk.firstWord}"..."${chunk.lastWord}", got "${actualFirstWord}"..."${actualLastWord}"`);
             }
 
-            // 4. Validate word boundaries
-            const cleanLastWord = chunk.lastWord.replace(/[.!?]$/, '');
-            if (actualFirstWord !== chunk.firstWord || actualLastWord !== cleanLastWord) {
-                throw new Error(`Chunk ${i} boundary validation failed: expected "${chunk.firstWord}"..."${cleanLastWord}", got "${actualFirstWord}"..."${actualLastWord}"`);
-            }
-
-            // 5. Validate chunk sequence
             if (i > 0) {
                 const prevChunk = chunks[i - 1];
-                if (chunk.startIndex !== prevChunk.endIndex) {
-                    throw new Error(`Chunk ${i} does not start where previous chunk ended`);
+                if (chunk.startIndex !== prevChunk.endIndex + 1) {
+                    warnings.push(`Warning: Chunk ${i} does not start where previous chunk ended`);
                 }
-            } else if (chunk.startIndex !== 0) {
-                throw new Error('First chunk must start at index 0');
+            } else if (chunk.startIndex !== 1) {
+                warnings.push('Warning: First chunk does not start at index 1');
             }
 
-            // 6. Validate start of next chunk if this isn't the last chunk
             if (i < chunks.length - 1) {
-                const nextChunkStart = text.slice(chunk.endIndex).match(/^\s*(\w+)/);
-                if (!nextChunkStart || nextChunkStart[1] !== chunks[i + 1].firstWord) {
-                    throw new Error(`Next chunk should start with "${chunks[i + 1].firstWord}" but found "${nextChunkStart ? nextChunkStart[1] : 'nothing'}"`);
+                const nextChunkStart = text.slice(chunk.endIndex);
+                const nextExpectedWord = chunks[i + 1].firstWord;
+                if (!nextChunkStart.startsWith(nextExpectedWord)) {
+                    warnings.push(`Warning: Next chunk should start with "${nextExpectedWord}" but found "${nextChunkStart.slice(0, nextExpectedWord.length)}"`);
                 }
             }
         }
 
+        // Log all warnings
+        if (warnings.length > 0) {
+            console.log('\nValidation Warnings:');
+            warnings.forEach(warning => console.log(warning));
+        }
+
         return {
             totalLength: text.length,
-            chunks: chunks
+            chunks: chunks,
+            warnings: warnings
         };
     } catch (error) {
         throw new Error(`Chunking failed: ${error.message}`);

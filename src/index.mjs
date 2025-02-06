@@ -33,10 +33,17 @@ program
             const savedResult = await saveResult({
                 filepath,
                 type: options.type,
-                content: result
+                content: result,
+                originalText: content,
+                warnings: result.warnings
             });
 
-            console.log('Result:', JSON.stringify(result, null, 2));
+            if (result.warnings && result.warnings.length > 0) {
+                console.log('\nValidation Warnings:');
+                result.warnings.forEach(warning => console.log(warning));
+            }
+
+            console.log('\nResult:', JSON.stringify(result, null, 2));
         } catch (error) {
             console.error('Error:', error.message);
             process.exit(1);
