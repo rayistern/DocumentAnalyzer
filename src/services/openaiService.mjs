@@ -102,31 +102,42 @@ async function chunkContent(text, maxChunkLength = 2000) {
 
             // Split into words while preserving whitespace, filter out empty strings
             const words = chunkText.split(/(\s+)/).filter(word => word.length > 0);
-            const actualFirstWord = words.find(w => /\S/.test(w)) || '';
-            const actualLastWord = [...words].reverse().find(w => /\S/.test(w)) || '';
+            const actualFirstWord = words.find(w => /\S/.test(w))?.trim() || '';
+            const actualLastWord = [...words].reverse().find(w => /\S/.test(w))?.trim() || '';
+
+            const expectedFirstWord = chunk.firstWord.trim();
+            const expectedLastWord = chunk.lastWord.trim();
 
             console.log('Word boundaries:', {
-                expected: { first: chunk.firstWord, last: chunk.lastWord },
+                expected: { first: expectedFirstWord, last: expectedLastWord },
                 actual: { first: actualFirstWord, last: actualLastWord }
             });
 
+            // Remove punctuation for comparison
+            const stripPunctuation = (str) => str.replace(/[.,!?;]$/g, '').trim();
+
+            const actualFirstWordStripped = stripPunctuation(actualFirstWord);
+            const actualLastWordStripped = stripPunctuation(actualLastWord);
+            const expectedFirstWordStripped = stripPunctuation(expectedFirstWord);
+            const expectedLastWordStripped = stripPunctuation(expectedLastWord);
+
             // Collect warnings instead of throwing errors
             if (!/[.!?]\s*$/.test(chunkText)) {
-                warnings.push(`Warning: Chunk ${i} does not end with a complete sentence`);
+                warnings.push(`Warning: Chunk ${i + 1} does not end with a complete sentence`);
             }
 
             if (chunkText.length > maxChunkLength) {
-                warnings.push(`Warning: Chunk ${i} exceeds maximum length`);
+                warnings.push(`Warning: Chunk ${i + 1} exceeds maximum length`);
             }
 
-            if (actualFirstWord !== chunk.firstWord || actualLastWord !== chunk.lastWord) {
-                warnings.push(`Warning: Chunk ${i} boundary mismatch - expected "${chunk.firstWord}"..."${chunk.lastWord}", got "${actualFirstWord}"..."${actualLastWord}"`);
+            if (actualFirstWordStripped !== expectedFirstWordStripped || actualLastWordStripped !== expectedLastWordStripped) {
+                warnings.push(`Warning: Chunk ${i + 1} boundary mismatch - expected "${expectedFirstWord}"..."${expectedLastWord}", got "${actualFirstWord}"..."${actualLastWord}"`);
             }
 
             if (i > 0) {
                 const prevChunk = chunks[i - 1];
                 if (chunk.startIndex !== prevChunk.endIndex + 1) {
-                    warnings.push(`Warning: Chunk ${i} does not start where previous chunk ended`);
+                    warnings.push(`Warning: Chunk ${i + 1} does not start where previous chunk ended`);
                 }
             } else if (chunk.startIndex !== 1) {
                 warnings.push('Warning: First chunk does not start at index 1');
@@ -134,9 +145,11 @@ async function chunkContent(text, maxChunkLength = 2000) {
 
             if (i < chunks.length - 1) {
                 const nextChunkStart = text.slice(chunk.endIndex);
-                const nextExpectedWord = chunks[i + 1].firstWord;
-                if (!nextChunkStart.startsWith(nextExpectedWord)) {
-                    warnings.push(`Warning: Next chunk should start with "${nextExpectedWord}" but found "${nextChunkStart.slice(0, nextExpectedWord.length)}"`);
+                const nextExpectedWord = chunks[i + 1].firstWord.trim();
+                const actualNextWord = nextChunkStart.trim().split(/\s+/)[0]?.trim() || '';
+
+                if (stripPunctuation(actualNextWord) !== stripPunctuation(nextExpectedWord)) {
+                    warnings.push(`Warning: Next chunk should start with "${nextExpectedWord}" but found "${actualNextWord}"`);
                 }
             }
         }

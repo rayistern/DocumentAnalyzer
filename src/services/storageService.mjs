@@ -14,16 +14,17 @@ export async function saveResult(result) {
     try {
         const { filepath, type, content, originalText, warnings = [] } = result;
 
-        if (type === 'chunk') {
-            // Save document first with warnings
-            const [document] = await db.insert(documents)
-                .values({
-                    filepath,
-                    totalLength: content.totalLength,
-                    warnings: warnings.join('\n')  // Store warnings as newline-separated string
-                })
-                .returning();
+        // Save document with basic info for all types
+        const [document] = await db.insert(documents)
+            .values({
+                filepath,
+                totalLength: originalText ? originalText.length : content.totalLength,
+                warnings: warnings.join('\n'),  // Store warnings as newline-separated string
+            })
+            .returning();
 
+        // Only store chunks for chunk type results
+        if (type === 'chunk' && content.chunks) {
             // Save all chunks with their content
             const chunkPromises = content.chunks.map(chunk => {
                 return db.insert(chunks)
@@ -38,10 +39,9 @@ export async function saveResult(result) {
             });
 
             await Promise.all(chunkPromises);
-            return document;
-        } else {
-            throw new Error('Unsupported result type');
         }
+
+        return document;
     } catch (error) {
         throw new Error(`Database error: ${error.message}`);
     }
