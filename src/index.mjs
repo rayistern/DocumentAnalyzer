@@ -6,6 +6,8 @@ import { processFile } from './services/openaiService.mjs';
 import { saveResult, getResults } from './services/storageService.mjs';
 import { readTextFile } from './utils/fileReader.mjs';
 import { systemLogger as logger } from './services/loggingService.mjs';
+import { db } from './db.js';
+import { documents } from './schema.js';
 
 dotenv.config();
 
@@ -28,7 +30,14 @@ program
             const content = await readTextFile(filepath);
 
             console.log('Processing with OpenAI...');
-            const result = await processFile(content, options.type, options.maxChunkLength);
+            const document = await db.insert(documents)
+                .values({
+                    filepath,
+                    totalLength: content.length
+                })
+                .returning();
+
+            const result = await processFile(content, options.type, document[0].id);
 
             console.log('Storing result...');
             await saveResult({

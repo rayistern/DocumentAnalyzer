@@ -1,64 +1,91 @@
 import OpenAI from 'openai';
+import { db } from '../db.js';
+import { llmLogs } from '../schema.js';
+import { OPENAI_SETTINGS, OPENAI_PROMPTS } from '../config/settings.mjs';
 
-// the newest OpenAI model is "gpt-4o" which was released May 13, 2024. do not change this unless explicitly requested by the user
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY
 });
 
-export async function processFile(content, type) {
+async function logLLMInteraction(documentId, requestType, prompt, response, tokens, duration) {
+    try {
+        await db.insert(llmLogs).values({
+            documentId,
+            requestType,
+            prompt: JSON.stringify(prompt),
+            response: JSON.stringify(response), 
+            tokens,
+            duration
+        });
+    } catch (error) {
+        console.error('Failed to log LLM interaction:', error);
+    }
+}
+
+export async function processFile(content, type, documentId) {
+    const startTime = Date.now();
+    let response, prompt;
+
     try {
         if (type === 'sentiment') {
-            return await analyzeSentiment(content);
+            prompt = OPENAI_PROMPTS.sentiment;
+            response = await analyzeSentiment(content);
         } else {
-            return await summarizeContent(content);
+            prompt = OPENAI_PROMPTS.summarize;
+            response = await summarizeContent(content);
         }
+
+        const duration = Date.now() - startTime;
+        await logLLMInteraction(
+            documentId,
+            type,
+            prompt,
+            response,
+            response.usage.total_tokens,
+            duration
+        );
+
+        return response;
     } catch (error) {
-        throw new Error(`OpenAI processing failed: ${error.message}`);
+        console.error('Processing failed:', error);
+        throw error;
     }
 }
 
 async function summarizeContent(text) {
-    try {
-        const response = await openai.chat.completions.create({
-            model: "gpt-4o",
-            messages: [
-                {
-                    role: "system",
-                    content: "Summarize the following text and provide the result in JSON format with 'summary' and 'keyPoints' fields."
-                },
-                {
-                    role: "user",
-                    content: text
-                }
-            ],
-            response_format: { type: "json_object" }
-        });
+    const response = await openai.chat.completions.create({
+        model: OPENAI_SETTINGS.model,
+        messages: [
+            {
+                role: "system",
+                content: OPENAI_PROMPTS.summarize.content
+            },
+            {
+                role: "user",
+                content: text
+            }
+        ],
+        response_format: { type: "json_object" }
+    });
 
-        return JSON.parse(response.choices[0].message.content);
-    } catch (error) {
-        throw new Error(`Summarization failed: ${error.message}`);
-    }
+    return response;
 }
 
 async function analyzeSentiment(text) {
-    try {
-        const response = await openai.chat.completions.create({
-            model: "gpt-4o",
-            messages: [
-                {
-                    role: "system",
-                    content: "Analyze the sentiment of the text and provide a JSON response with 'sentiment' (positive/negative/neutral), 'score' (1-5), and 'confidence' (0-1) fields."
-                },
-                {
-                    role: "user",
-                    content: text
-                }
-            ],
-            response_format: { type: "json_object" }
-        });
+    const response = await openai.chat.completions.create({
+        model: OPENAI_SETTINGS.model,
+        messages: [
+            {
+                role: "system",
+                content: OPENAI_PROMPTS.sentiment.content
+            },
+            {
+                role: "user",
+                content: text
+            }
+        ],
+        response_format: { type: "json_object" }
+    });
 
-        return JSON.parse(response.choices[0].message.content);
-    } catch (error) {
-        throw new Error(`Sentiment analysis failed: ${error.message}`);
-    }
+    return response;
 }
