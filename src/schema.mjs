@@ -20,13 +20,3 @@ export const chunks = pgTable('chunks', {
   content: text('content').notNull(),
   createdAt: timestamp('created_at').defaultNow()
 });
-
-export const llmResponses = pgTable('llm_responses', {
-  id: serial('id').primaryKey(),
-  model: varchar('model', { length: 50 }).notNull(),
-  prompt: text('prompt').notNull(),
-  response: jsonb('response').notNull(),
-  processingTime: integer('processing_time_ms'),
-  createdAt: timestamp('created_at').defaultNow(),
-  type: varchar('type', { length: 50 }).notNull() // 'sentiment', 'summary', or 'chunk'
-});

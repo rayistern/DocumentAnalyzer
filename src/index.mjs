@@ -5,7 +5,6 @@ import dotenv from 'dotenv';
 import { processFile } from './services/openaiService.mjs';
 import { saveResult, getResults } from './services/storageService.mjs';
 import { readTextFile } from './utils/fileReader.mjs';
-import { systemLogger as logger } from './services/loggingService.mjs';
 
 dotenv.config();
 
@@ -51,15 +50,8 @@ program
                 result.warnings.forEach(warning => console.log(warning));
             }
 
-            await logger.info('Processing completed successfully', { 
-                filepath,
-                type: options.type,
-                warnings: result.warnings?.length || 0
-            });
-
             console.log('\nResult:', JSON.stringify(result, null, 2));
         } catch (error) {
-            await logger.error('Processing failed', error, { filepath, options });
             console.error('Error:', error.message);
             process.exit(1);
         }
@@ -71,31 +63,23 @@ program
     .action(async () => {
         try {
             const results = await getResults();
-
             console.log('Processed Documents:');
             Object.values(results).forEach(doc => {
                 console.log(`\nDocument: ${doc.filepath}`);
-                console.log(`Type: ${doc.type}`);
-                console.log(`Created: ${doc.timestamp}`);
-
+                console.log(`Total Length: ${doc.totalLength}`);
+                console.log(`Created: ${doc.createdAt}`);
                 if (doc.content.textToRemove) {
                     console.log('Removed Elements:');
                     doc.content.textToRemove.forEach(item => {
                         console.log(`  - "${item.text}" (pos ${item.startPosition}-${item.endPosition})`);
                     });
                 }
-
-                if (doc.content.chunks) {
-                    console.log('Chunks:', doc.content.chunks.length);
-                    doc.content.chunks.forEach((chunk, i) => {
-                        console.log(`  ${i + 1}. ${chunk.firstWord}...${chunk.lastWord} (${chunk.endIndex - chunk.startIndex + 1} chars)`);
-                    });
-                }
+                console.log('Chunks:', doc.content.chunks.length);
+                doc.content.chunks.forEach((chunk, i) => {
+                    console.log(`  ${i + 1}. ${chunk.firstWord}...${chunk.lastWord} (${chunk.endIndex - chunk.startIndex + 1} chars)`);
+                });
             });
-
-            await logger.info('Document list displayed successfully', { count: results.length });
         } catch (error) {
-            await logger.error('Failed to list documents', error);
             console.error('Error:', error.message);
             process.exit(1);
         }
