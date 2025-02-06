@@ -1,134 +1,172 @@
 import OpenAI from 'openai';
 import { OPENAI_SETTINGS, OPENAI_PROMPTS } from '../config/settings.mjs';
+import { openAILogger as logger } from './loggingService.mjs';
 
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY
 });
 
+async function makeOpenAIRequest(messages, options = {}) {
+    const startTime = Date.now();
+    try {
+        const request = {
+            model: OPENAI_SETTINGS.model,
+            messages,
+            ...options
+        };
+
+        await logger.debug('Making OpenAI API request', { 
+            model: request.model,
+            messages: messages.map(m => ({ role: m.role, content_length: m.content.length }))
+        });
+
+        const response = await openai.chat.completions.create(request);
+
+        const duration = Date.now() - startTime;
+        await logger.logAPI('POST', 'chat/completions', request, {
+            status: 200,
+            data: response
+        }, duration);
+
+        return response;
+    } catch (error) {
+        const duration = Date.now() - startTime;
+        await logger.logAPI('POST', 'chat/completions', {
+            model: OPENAI_SETTINGS.model,
+            messages
+        }, {
+            status: error.status || 500,
+            data: error.response || error.message
+        }, duration);
+        throw error;
+    }
+}
+
 export async function processFile(content, type, maxChunkLength = OPENAI_SETTINGS.defaultMaxChunkLength) {
     try {
+        await logger.info('Starting file processing', { 
+            type, 
+            contentLength: content.length,
+            maxChunkLength
+        });
+
+        let result;
         switch (type) {
             case 'sentiment':
-                return await analyzeSentiment(content);
+                result = await analyzeSentiment(content);
+                break;
             case 'chunk':
-                return await createChunks(content, maxChunkLength);
+                result = await createChunks(content, maxChunkLength);
+                break;
             default:
-                return await summarizeContent(content);
+                result = await summarizeContent(content);
         }
-    } catch (error) {
-        throw new Error(`OpenAI processing failed: ${error.message}`);
-    }
-}
 
-function cleanText(text, textToRemove, originalText) {
-    let cleanedText = text;
-    const tolerance = OPENAI_SETTINGS.textRemovalPositionTolerance;
-
-    if (textToRemove && Array.isArray(textToRemove)) {
-        textToRemove.forEach(item => {
-            // Find the actual text at the specified position
-            const actualText = originalText.substring(item.startPosition - 1, item.endPosition);
-
-            // Verify the position accuracy within tolerance
-            if (actualText === item.text || 
-                (Math.abs(actualText.length - item.text.length) <= tolerance && 
-                 actualText.includes(item.text))) {
-                cleanedText = cleanedText.replace(new RegExp(escapeRegExp(item.text), 'g'), '');
-            } else {
-                console.warn(`Warning: Text "${item.text}" not found at specified position (${item.startPosition}-${item.endPosition}). Found "${actualText}" instead.`);
-            }
+        await logger.info('File processing completed', { 
+            type, 
+            resultSize: JSON.stringify(result).length,
+            result // Log the complete result
         });
-        // Clean up extra whitespace and newlines
-        cleanedText = cleanedText.replace(/\s+/g, ' ').trim();
+        return result;
+    } catch (error) {
+        await logger.error('File processing failed', error, { type });
+        throw error;
     }
-    return cleanedText;
-}
-
-function escapeRegExp(string) {
-    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 async function createChunks(text, maxChunkLength) {
     try {
-        const response = await openai.chat.completions.create({
-            model: OPENAI_SETTINGS.model,
-            messages: [
-                {
-                    role: OPENAI_PROMPTS.chunk.role,
-                    content: OPENAI_PROMPTS.chunk.content(maxChunkLength)
-                },
-                {
-                    role: "user",
-                    content: text
-                }
-            ],
-            ...(OPENAI_SETTINGS.model !== 'o1-preview' && {
-                response_format: { type: "json_object" }
-            })
-        });
+        await logger.debug('Creating chunks', { textLength: text.length, maxChunkLength });
 
+        const messages = [
+            {
+                role: OPENAI_PROMPTS.chunk.role,
+                content: OPENAI_PROMPTS.chunk.content(maxChunkLength)
+            },
+            {
+                role: "user",
+                content: text
+            }
+        ];
+
+        const response = await makeOpenAIRequest(messages);
         const result = JSON.parse(response.choices[0].message.content);
 
-        // Process each chunk to have both original and cleaned versions
+        await logger.debug('Raw LLM response', {
+            raw_response: response.choices[0].message.content,
+            parsed_result: result
+        });
+
         if (result.chunks && result.textToRemove) {
-            result.chunks = result.chunks.map(chunk => {
-                const originalText = text.slice(chunk.startIndex - 1, chunk.endIndex);
-                const cleanedText = cleanText(originalText, result.textToRemove, text);
-                return {
-                    ...chunk,
-                    originalText,
-                    cleanedText
-                };
-            });
+            result.chunks = result.chunks.map(chunk => ({
+                ...chunk,
+                originalText: text.slice(chunk.startIndex - 1, chunk.endIndex)
+            }));
         }
 
-        result.warnings = validateChunks(result.chunks, text);
+        const warnings = validateChunks(result.chunks, text);
+        if (warnings.length > 0) {
+            await logger.warning('Validation warnings found', { warnings });
+        }
+
+        result.warnings = warnings;
         return result;
     } catch (error) {
+        await logger.error('Chunk creation failed', error);
         throw new Error(`Chunk creation failed: ${error.message}`);
     }
 }
 
 async function summarizeContent(text) {
     try {
-        const response = await openai.chat.completions.create({
-            model: OPENAI_SETTINGS.model,
-            messages: [
-                OPENAI_PROMPTS.summarize,
-                {
-                    role: "user",
-                    content: text
-                }
-            ],
-            ...(OPENAI_SETTINGS.model !== 'o1-preview' && {
-                response_format: { type: "json_object" }
-            })
+        await logger.debug('Summarizing content', { textLength: text.length });
+
+        const messages = [
+            OPENAI_PROMPTS.summarize,
+            {
+                role: "user",
+                content: text
+            }
+        ];
+
+        const response = await makeOpenAIRequest(messages);
+        const result = JSON.parse(response.choices[0].message.content);
+
+        await logger.debug('Raw LLM response', {
+            raw_response: response.choices[0].message.content,
+            parsed_result: result
         });
 
-        return JSON.parse(response.choices[0].message.content);
+        return result;
     } catch (error) {
+        await logger.error('Summarization failed', error);
         throw new Error(`Summarization failed: ${error.message}`);
     }
 }
 
 async function analyzeSentiment(text) {
     try {
-        const response = await openai.chat.completions.create({
-            model: OPENAI_SETTINGS.model,
-            messages: [
-                OPENAI_PROMPTS.sentiment,
-                {
-                    role: "user",
-                    content: text
-                }
-            ],
-            ...(OPENAI_SETTINGS.model !== 'o1-preview' && {
-                response_format: { type: "json_object" }
-            })
+        await logger.debug('Analyzing sentiment', { textLength: text.length });
+
+        const messages = [
+            OPENAI_PROMPTS.sentiment,
+            {
+                role: "user",
+                content: text
+            }
+        ];
+
+        const response = await makeOpenAIRequest(messages);
+        const result = JSON.parse(response.choices[0].message.content);
+
+        await logger.debug('Raw LLM response', {
+            raw_response: response.choices[0].message.content,
+            parsed_result: result
         });
 
-        return JSON.parse(response.choices[0].message.content);
+        return result;
     } catch (error) {
+        await logger.error('Sentiment analysis failed', error);
         throw new Error(`Sentiment analysis failed: ${error.message}`);
     }
 }
@@ -138,33 +176,35 @@ function validateChunks(chunks, originalText) {
     let previousEndIndex = 0;
 
     chunks.forEach((chunk, index) => {
-        // Check for gaps between chunks
         if (chunk.startIndex !== previousEndIndex + 1 && index > 0) {
             const gapText = originalText.slice(previousEndIndex, chunk.startIndex - 1);
-            warnings.push(`Gap detected between chunk ${index} and ${index + 1}. Gap content: "${gapText}"`);
+            const warning = `Gap detected between chunk ${index} and ${index + 1}. Gap content: "${gapText}"`;
+            warnings.push(warning);
+            logger.warning(warning, { chunkIndex: index });
         }
 
-        // Check for sentence boundaries
         const chunkText = originalText.slice(chunk.startIndex - 1, chunk.endIndex);
-        const endsWithPeriod = chunkText.trim().match(/[.!?]$/);
-
-        if (!endsWithPeriod) {
-            warnings.push(`Chunk ${index + 1} does not end with a sentence break: "${chunkText}"`);
+        if (!chunkText.trim().match(/[.!?]$/)) {
+            const warning = `Chunk ${index + 1} does not end with a sentence break: "${chunkText}"`;
+            warnings.push(warning);
+            logger.warning(warning, { chunkIndex: index });
         }
 
-        // Verify chunk size
         const chunkLength = chunk.endIndex - chunk.startIndex + 1;
         if (chunkLength > OPENAI_SETTINGS.defaultMaxChunkLength) {
-            warnings.push(`Chunk ${index + 1} exceeds maximum length (${chunkLength} > ${OPENAI_SETTINGS.defaultMaxChunkLength})`);
+            const warning = `Chunk ${index + 1} exceeds maximum length (${chunkLength} > ${OPENAI_SETTINGS.defaultMaxChunkLength})`;
+            warnings.push(warning);
+            logger.warning(warning, { chunkIndex: index, chunkLength });
         }
 
         previousEndIndex = chunk.endIndex;
     });
 
-    // Check if we processed the entire text
     if (previousEndIndex < originalText.length) {
         const remainingText = originalText.slice(previousEndIndex);
-        warnings.push(`Unprocessed text remaining: "${remainingText}"`);
+        const warning = `Unprocessed text remaining: "${remainingText}"`;
+        warnings.push(warning);
+        logger.warning(warning, { remainingLength: remainingText.length });
     }
 
     return warnings;
