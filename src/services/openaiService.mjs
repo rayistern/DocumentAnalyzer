@@ -28,16 +28,20 @@ async function logApiCall(requestType, requestPayload, responsePayload, success,
     }
 }
 
-async function logChunkValidation(documentId, chunkIndex, expected, actual, chunkText, passed, error = null) {
+async function logChunkValidation(documentId, chunkIndex, expected, actual, chunkText, passed, error = null, fullText = '', startIndex = 0, endIndex = 0) {
     try {
+        const followingContext = fullText.substring(endIndex, endIndex + 5);
         await db.insert(chunkValidationLogs).values({
             documentId,
             chunkIndex,
+            startIndex,
+            endIndex,
             expectedFirstWord: expected.first,
             expectedLastWord: expected.last,
             actualFirstWord: actual.first,
             actualLastWord: actual.last,
             chunkText,
+            followingContext,
             validationPassed: passed,
             validationError: error?.message
         });
@@ -133,13 +137,13 @@ async function chunkContent(text, maxChunkLength = 2000) {
             let validationError = null;
             if (!validationPassed) {
                 if (actualFirstWord !== chunk.firstWord) {
-                    validationError = `First word mismatch: AI claimed "${chunk.firstWord}" but actual text starts with "${actualFirstWord}"`;
+                    validationError = `First word mismatch at index ${chunk.startIndex}: AI claimed "${chunk.firstWord}" but actual text starts with "${actualFirstWord}"`;
                 } else if (actualLastWord !== chunk.lastWord) {
-                    validationError = `Last word mismatch: AI claimed "${chunk.lastWord}" but actual text ends with "${actualLastWord}"`;
+                    validationError = `Last word mismatch at index ${chunk.endIndex}: AI claimed "${chunk.lastWord}" but actual text ends with "${actualLastWord}"`;
                 } else if (chunkText.length > maxChunkLength) {
-                    validationError = `Chunk exceeds maximum length of ${maxChunkLength} characters (actual: ${chunkText.length})`;
+                    validationError = `Chunk at index ${chunk.startIndex}-${chunk.endIndex} exceeds maximum length of ${maxChunkLength} characters (actual: ${chunkText.length})`;
                 } else if (!/[.!?][\s]*$/.test(chunkText.trim())) {
-                    validationError = `Chunk does not end with a complete sentence`;
+                    validationError = `Chunk at index ${chunk.startIndex}-${chunk.endIndex} does not end with a complete sentence`;
                 }
             }
 
@@ -150,7 +154,10 @@ async function chunkContent(text, maxChunkLength = 2000) {
                 actual,
                 chunkText,
                 validationPassed,
-                validationError ? new Error(validationError) : null
+                validationError ? new Error(validationError) : null,
+                text,
+                chunk.startIndex,
+                chunk.endIndex
             );
 
             if (!validationPassed) {

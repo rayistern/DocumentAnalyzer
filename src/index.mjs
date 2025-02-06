@@ -80,12 +80,22 @@ program
             console.log('\nRecent Chunk Validation Results:');
             logs.forEach((log, i) => {
                 console.log(`\nChunk #${log.chunkIndex}:`);
-                console.log(`Expected: ${log.expectedBoundary}`);
-                console.log(`Actual:   ${log.actualBoundary}`);
+                console.log(`Indexes: ${log.indexes.start} to ${log.indexes.end}`);
+                console.log('Expected boundaries:');
+                console.log(`  First word: "${log.expected.firstWord}"`);
+                console.log(`  Last word: "${log.expected.lastWord}"`);
+                console.log('Actual boundaries:');
+                console.log(`  First word: "${log.actual.firstWord}"`);
+                console.log(`  Last word: "${log.actual.lastWord}"`);
+                console.log('Full chunk text:');
+                console.log(`  "${log.chunkText}"`);
+                if (log.followingContext) {
+                    console.log(`Next 5 chars: "${log.followingContext}"`);
+                }
                 if (!log.passed) {
                     console.log('Error:', log.error);
-                    console.log('Problem chunk:', log.chunkText);
                 }
+                console.log('-'.repeat(80));
             });
         } catch (error) {
             console.error('Error:', error.message);

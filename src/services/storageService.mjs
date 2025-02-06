@@ -79,9 +79,20 @@ export async function getRecentValidationLogs() {
 
         return logs.map(log => ({
             chunkIndex: log.chunkIndex,
-            expectedBoundary: `"${log.expectedFirstWord}" to "${log.expectedLastWord}"`,
-            actualBoundary: `"${log.actualFirstWord}" to "${log.actualLastWord}"`,
+            indexes: {
+                start: log.startIndex,
+                end: log.endIndex
+            },
+            expected: {
+                firstWord: log.expectedFirstWord,
+                lastWord: log.expectedLastWord
+            },
+            actual: {
+                firstWord: log.actualFirstWord,
+                lastWord: log.actualLastWord
+            },
             chunkText: log.chunkText,
+            followingContext: log.followingContext,
             error: log.validationError,
             passed: log.validationPassed
         }));
