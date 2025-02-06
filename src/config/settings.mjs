@@ -1,5 +1,5 @@
 export const OPENAI_SETTINGS = {
-    model: "gpt-4",  // Using the correct model name
+    model: "o1-preview",  // newest model as of May 13, 2024
     defaultMaxChunkLength: 2000,
     textRemovalPositionTolerance: 5  // Maximum character difference allowed for text removal positions
 };
