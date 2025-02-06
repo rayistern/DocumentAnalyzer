@@ -20,12 +20,3 @@ export const chunks = pgTable('chunks', {
   content: text('content').notNull(),
   createdAt: timestamp('created_at').defaultNow()
 });
-
-export const llmLogs = pgTable('llm_logs', {
-  id: serial('id').primaryKey(),
-  documentId: integer('document_id').references(() => documents.id),
-  rawResponse: text('raw_response').notNull(),
-  requestParams: jsonb('request_params'), // Store request parameters like model, temperature, etc.
-  status: varchar('status', { length: 20 }).notNull(), // success, error, etc.
-  createdAt: timestamp('created_at').defaultNow()
-});
