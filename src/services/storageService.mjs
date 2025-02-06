@@ -14,18 +14,22 @@ export async function saveResult(result) {
     try {
         const { filepath, type, content, originalText, warnings = [] } = result;
 
-        // Save document with basic info for all types
+        // Base document data
+        const documentData = {
+            filepath,
+            totalLength: originalText ? originalText.length : 0,
+            resultType: type,
+            warnings: warnings.join('\n'),
+            content: type !== 'chunk' ? content : null // Store content directly for non-chunk types
+        };
+
+        // Save document
         const [document] = await db.insert(documents)
-            .values({
-                filepath,
-                totalLength: originalText ? originalText.length : content.totalLength,
-                warnings: warnings.join('\n'),  // Store warnings as newline-separated string
-            })
+            .values(documentData)
             .returning();
 
         // Only store chunks for chunk type results
         if (type === 'chunk' && content.chunks) {
-            // Save all chunks with their content
             const chunkPromises = content.chunks.map(chunk => {
                 return db.insert(chunks)
                     .values({

@@ -1,10 +1,12 @@
-import { pgTable, serial, text, integer, timestamp, varchar } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, timestamp, varchar, jsonb } from "drizzle-orm/pg-core";
 
 export const documents = pgTable('documents', {
   id: serial('id').primaryKey(),
   filepath: varchar('filepath', { length: 255 }).notNull(),
   totalLength: integer('total_length').notNull(),
-  warnings: text('warnings'),  // New field for storing validation warnings
+  resultType: varchar('result_type', { length: 20 }).notNull(), // 'summary', 'sentiment', or 'chunk'
+  content: jsonb('content'), // Store the JSON result for summary and sentiment
+  warnings: text('warnings'),
   createdAt: timestamp('created_at').defaultNow()
 });
 
