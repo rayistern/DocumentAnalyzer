@@ -10,6 +10,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@supabase/supabase-js": "^2.48.1",
     "@types/pg": "^8.11.11",
     "commander": "^13.1.0",
     "dotenv": "^16.4.7",

@@ -1,18 +1,22 @@
 import OpenAI from 'openai';
 import { OPENAI_SETTINGS, OPENAI_PROMPTS } from '../config/settings.mjs';
 import { logLLMResponse } from './llmLoggingService.mjs';
+import { saveAnalysis } from './supabaseService.mjs';
+import dotenv from 'dotenv'
+
+dotenv.config()
 
 const openai = new OpenAI({
-    apiKey: "process.env.OPENAI_API_KEY"
+    apiKey: process.env.OPENAI_API_KEY
 });
 
-export async function processFile(content, type, maxChunkLength = OPENAI_SETTINGS.defaultMaxChunkLength) {
+export async function processFile(content, type, filepath, maxChunkLength = OPENAI_SETTINGS.defaultMaxChunkLength) {
     try {
         switch (type) {
             case 'sentiment':
                 return await analyzeSentiment(content);
             case 'chunk':
-                return await createChunks(content, maxChunkLength);
+                return await createChunks(content, maxChunkLength, filepath);
             default:
                 return await summarizeContent(content);
         }
@@ -54,7 +58,7 @@ function removeMarkdownFormatting(text) {
     });
 }
 
-async function createChunks(text, maxChunkLength) {
+async function createChunks(text, maxChunkLength, filepath) {
     try {
         const response = await openai.chat.completions.create({
             model: OPENAI_SETTINGS.model,
@@ -91,6 +95,10 @@ async function createChunks(text, maxChunkLength) {
         }
 
         result.warnings = validateChunks(result.chunks, text);
+        
+        // Store in Supabase
+        await saveAnalysis(text, 'chunk', { ...result, filepath });
+        
         return result;
     } catch (error) {
         throw new Error(`Chunk creation failed: ${error.message}`);
@@ -114,8 +122,12 @@ async function summarizeContent(text) {
         });
 
         await logLLMResponse(null, response.choices[0].message.content, OPENAI_SETTINGS.model);
-
-        return JSON.parse(response.choices[0].message.content);
+        const result = JSON.parse(response.choices[0].message.content);
+        
+        // Store in Supabase
+        await saveAnalysis(text, 'summary', result);
+        
+        return result;
     } catch (error) {
         throw new Error(`Summarization failed: ${error.message}`);
     }
@@ -138,42 +150,50 @@ async function analyzeSentiment(text) {
         });
 
         await logLLMResponse(null, response.choices[0].message.content, OPENAI_SETTINGS.model);
-
-        return JSON.parse(response.choices[0].message.content);
+        const result = JSON.parse(response.choices[0].message.content);
+        
+        // Store in Supabase
+        await saveAnalysis(text, 'sentiment', result);
+        
+        return result;
     } catch (error) {
         throw new Error(`Sentiment analysis failed: ${error.message}`);
     }
 }
 
 function validateChunks(chunks, originalText) {
-    const warnings = [];
-    let previousEndIndex = 0;
-
+    const documentWarnings = [];
+    
     chunks.forEach((chunk, index) => {
-        if (chunk.startIndex !== previousEndIndex + 1 && index > 0) {
-            const gapText = originalText.slice(previousEndIndex, chunk.startIndex - 1);
-            warnings.push(`Gap detected between chunk ${index} and ${index + 1}. Gap content: "${gapText}"`);
+        const chunkWarnings = [];
+        
+        if (chunk.startIndex !== (index === 0 ? 1 : chunks[index - 1].endIndex + 1)) {
+            const gapText = originalText.slice(index === 0 ? 0 : chunks[index - 1].endIndex, chunk.startIndex - 1);
+            chunkWarnings.push(`Gap detected before this chunk. Gap content: "${gapText}"`);
         }
 
         const chunkText = originalText.slice(chunk.startIndex - 1, chunk.endIndex);
         const endsWithPeriod = chunkText.trim().match(/[.!?]$/);
 
         if (!endsWithPeriod) {
-            warnings.push(`Chunk ${index + 1} does not end with a sentence break: "${chunkText}"`);
+            chunkWarnings.push(`Does not end with a sentence break: "${chunkText}"`);
         }
 
         const chunkLength = chunk.endIndex - chunk.startIndex + 1;
         if (chunkLength > OPENAI_SETTINGS.defaultMaxChunkLength) {
-            warnings.push(`Chunk ${index + 1} exceeds maximum length (${chunkLength} > ${OPENAI_SETTINGS.defaultMaxChunkLength})`);
+            chunkWarnings.push(`Exceeds maximum length (${chunkLength} > ${OPENAI_SETTINGS.defaultMaxChunkLength})`);
         }
 
-        previousEndIndex = chunk.endIndex;
+        chunk.warnings = chunkWarnings;
+        if (chunkWarnings.length > 0) {
+            documentWarnings.push(`Chunk ${index + 1} has warnings: ${chunkWarnings.join(', ')}`);
+        }
     });
 
-    if (previousEndIndex < originalText.length) {
-        const remainingText = originalText.slice(previousEndIndex);
-        warnings.push(`Unprocessed text remaining: "${remainingText}"`);
+    if (chunks[chunks.length - 1].endIndex < originalText.length) {
+        const remainingText = originalText.slice(chunks[chunks.length - 1].endIndex);
+        documentWarnings.push(`Unprocessed text remaining: "${remainingText}"`);
     }
 
-    return warnings;
+    return documentWarnings;
 }

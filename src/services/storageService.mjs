@@ -17,6 +17,7 @@ export async function saveResult(result) {
         // Base document data
         const documentData = {
             filepath,
+            originalFilename: filepath.split('/').pop(), // Extract filename from path
             totalLength: originalText ? originalText.length : 0,
             resultType: type,
             warnings: warnings.join('\n'),
@@ -38,7 +39,8 @@ export async function saveResult(result) {
                         endIndex: chunk.endIndex,
                         firstWord: chunk.firstWord,
                         lastWord: chunk.lastWord,
-                        content: originalText.slice(chunk.startIndex - 1, chunk.endIndex)
+                        content: chunk.cleanedText || originalText.slice(chunk.startIndex - 1, chunk.endIndex),
+                        warnings: Array.isArray(chunk.warnings) ? chunk.warnings.join('\n') : chunk.warnings
                     });
             });
 

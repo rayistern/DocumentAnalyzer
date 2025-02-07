@@ -3,8 +3,8 @@
 import { Command } from 'commander';
 import dotenv from 'dotenv';
 import { processFile } from './services/openaiService.mjs';
-import { saveResult, getResults } from './services/storageService.mjs';
 import { readTextFile } from './utils/fileReader.mjs';
+import { getAnalysisByType } from './services/supabaseService.mjs';
 
 dotenv.config();
 
@@ -27,16 +27,7 @@ program
             const content = await readTextFile(filepath);
 
             console.log('Processing with OpenAI...');
-            const result = await processFile(content, options.type, options.maxChunkLength);
-
-            console.log('Storing result...');
-            await saveResult({
-                filepath,
-                type: options.type,
-                content: result,
-                originalText: content,
-                warnings: result.warnings
-            });
+            const result = await processFile(content, options.type, filepath, options.maxChunkLength);
 
             if (result.textToRemove && result.textToRemove.length > 0) {
                 console.log('\nIdentified text to remove:');
@@ -60,24 +51,14 @@ program
 program
     .command('list')
     .description('List all processed documents')
-    .action(async () => {
+    .option('-t, --type <type>', 'analysis type to list (sentiment|summary|chunk)')
+    .action(async (options) => {
         try {
-            const results = await getResults();
-            console.log('Processed Documents:');
-            Object.values(results).forEach(doc => {
-                console.log(`\nDocument: ${doc.filepath}`);
-                console.log(`Total Length: ${doc.totalLength}`);
-                console.log(`Created: ${doc.createdAt}`);
-                if (doc.content.textToRemove) {
-                    console.log('Removed Elements:');
-                    doc.content.textToRemove.forEach(item => {
-                        console.log(`  - "${item.text}" (pos ${item.startPosition}-${item.endPosition})`);
-                    });
-                }
-                console.log('Chunks:', doc.content.chunks.length);
-                doc.content.chunks.forEach((chunk, i) => {
-                    console.log(`  ${i + 1}. ${chunk.firstWord}...${chunk.lastWord} (${chunk.endIndex - chunk.startIndex + 1} chars)`);
-                });
+            const results = await getAnalysisByType(options.type);
+            console.log(`Found ${results.length} documents:`);
+            results.forEach(doc => {
+                console.log(`\nDocument created at: ${doc.created_at}`);
+                console.log('Result:', JSON.stringify(doc.result, null, 2));
             });
         } catch (error) {
             console.error('Error:', error.message);

@@ -3,6 +3,7 @@ import { pgTable, serial, text, integer, timestamp, varchar, jsonb } from "drizz
 export const documents = pgTable('documents', {
   id: serial('id').primaryKey(),
   filepath: varchar('filepath', { length: 255 }).notNull(),
+  originalFilename: varchar('original_filename', { length: 255 }).notNull(),
   totalLength: integer('total_length').notNull(),
   resultType: varchar('result_type', { length: 20 }).notNull(), // 'summary', 'sentiment', or 'chunk'
   content: jsonb('content'), // Store the JSON result for summary and sentiment
@@ -18,5 +19,6 @@ export const chunks = pgTable('chunks', {
   firstWord: varchar('first_word', { length: 255 }).notNull(),
   lastWord: varchar('last_word', { length: 255 }).notNull(),
   content: text('content').notNull(),
+  warnings: text('warnings'),
   createdAt: timestamp('created_at').defaultNow()
 });

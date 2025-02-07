@@ -1,50 +1,32 @@
-import { documents } from '../schema.mjs';
-import { drizzle } from 'drizzle-orm/node-postgres';
-import pkg from 'pg';
-const { Pool } = pkg;
+import { createClient } from '@supabase/supabase-js'
+import dotenv from 'dotenv'
 
-const pool = new Pool({
-    connectionString: process.env.DATABASE_URL
-});
+dotenv.config()
 
-const db = drizzle(pool);
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_ANON_KEY
+)
 
-export async function logLLMResponse(filepath, rawResponse, modelUsed) {
-    try {
-        // Insert a new document with the required fields
-        const [document] = await db.insert(documents)
-            .values({
-                filepath: filepath || 'llm-log.txt',  // Provide a default filepath since it's required
-                totalLength: rawResponse.length,
-                resultType: 'log',
-                content: {
-                    raw_llm_response: rawResponse,
-                    model: modelUsed,
-                    timestamp: new Date().toISOString()
-                }
-            })
-            .returning();
+export async function logLLMResponse(prompt, response, model) {
+  try {
+    console.log(`Logging LLM response for model: ${model}`)
+    const { error } = await supabase
+      .from('llm_logs')
+      .insert({
+        prompt,
+        response,
+        model,
+        created_at: new Date().toISOString()
+      })
 
-        return document;
-    } catch (error) {
-        console.error('Failed to log LLM response:', error);
-        // Don't throw the error - we don't want logging failures to break the main flow
-        return null;
+    if (error) {
+      console.error('Supabase logging error:', error)
+      throw error
     }
-}
-
-export async function getLLMResponseLog(documentId) {
-    try {
-        const [document] = await db
-            .select({
-                content: documents.content
-            })
-            .from(documents)
-            .where(eq(documents.id, documentId));
-
-        return document?.content?.raw_llm_response;
-    } catch (error) {
-        console.error('Failed to retrieve LLM response log:', error);
-        return null;
-    }
+    console.log('Successfully logged LLM response')
+  } catch (error) {
+    console.error('Failed to log LLM response:', error.message)
+    console.error('Full error:', error)
+  }
 }
