@@ -43,3 +43,6 @@ replit.nix
 
 # Cache
 .cache/
+
+.inputFiles/
+.outputFiles/

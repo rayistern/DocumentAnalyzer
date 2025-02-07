@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import { OPENAI_SETTINGS, OPENAI_PROMPTS } from '../config/settings.mjs';
 import { logLLMResponse } from './llmLoggingService.mjs';
-import { saveAnalysis } from './supabaseService.mjs';
+import { saveAnalysis, saveCleanedDocument } from './supabaseService.mjs';
 import dotenv from 'dotenv'
 
 dotenv.config()
@@ -17,6 +17,8 @@ export async function processFile(content, type, filepath, maxChunkLength = OPEN
                 return await analyzeSentiment(content);
             case 'chunk':
                 return await createChunks(content, maxChunkLength, filepath);
+            case 'cleanAndChunk':
+                return await cleanAndChunkDocument(content, maxChunkLength, filepath);
             default:
                 return await summarizeContent(content);
         }
@@ -31,14 +33,50 @@ function cleanText(text, textToRemove, originalText) {
 
     if (textToRemove && Array.isArray(textToRemove)) {
         textToRemove.forEach(item => {
+            // Try to find by position first
             const actualText = originalText.substring(item.startPosition - 1, item.endPosition);
+            let found = false;
 
+            // Check if position-based match works
             if (actualText === item.text || 
                 (Math.abs(actualText.length - item.text.length) <= tolerance && 
                  actualText.includes(item.text))) {
-                cleanedText = cleanedText.replace(new RegExp(escapeRegExp(item.text), 'g'), '');
-            } else {
-                console.warn(`Warning: Text "${item.text}" not found at specified position (${item.startPosition}-${item.endPosition}). Found "${actualText}" instead.`);
+                found = true;
+                cleanedText = cleanedText.replace(new RegExp(escapeRegExp(actualText), 'g'), '');
+                console.log(`Removed text by position match: "${actualText}"`);
+            }
+
+            // If not found by position, try context matching
+            if (!found && item.contextBefore && item.contextAfter) {
+                const pattern = escapeRegExp(item.contextBefore + item.text + item.contextAfter);
+                if (text.match(pattern)) {
+                    found = true;
+                    cleanedText = cleanedText.replace(new RegExp(pattern, 'g'), '');
+                    console.log(`Removed text by context match: "${item.text}" with context`);
+                } else {
+                    // Try just the text with either context
+                    const beforePattern = escapeRegExp(item.contextBefore + item.text);
+                    const afterPattern = escapeRegExp(item.text + item.contextAfter);
+                    if (text.match(beforePattern)) {
+                        found = true;
+                        cleanedText = cleanedText.replace(new RegExp(beforePattern, 'g'), '');
+                        console.log(`Removed text by before-context match: "${item.text}"`);
+                    } else if (text.match(afterPattern)) {
+                        found = true;
+                        cleanedText = cleanedText.replace(new RegExp(afterPattern, 'g'), '');
+                        console.log(`Removed text by after-context match: "${item.text}"`);
+                    }
+                }
+            }
+
+            if (!found) {
+                // If still not found, try just the text itself as a last resort
+                if (text.includes(item.text)) {
+                    cleanedText = cleanedText.replace(new RegExp(escapeRegExp(item.text), 'g'), '');
+                    console.log(`Removed text by exact match: "${item.text}"`);
+                } else {
+                    console.warn(`Warning: Could not find text "${item.text}" at position ${item.startPosition}-${item.endPosition} or with context`);
+                }
             }
         });
         cleanedText = cleanedText.replace(/\s+/g, ' ').trim();
@@ -161,18 +199,21 @@ async function analyzeSentiment(text) {
     }
 }
 
-function validateChunks(chunks, originalText) {
+function validateChunks(chunks, cleanedText) {
     const documentWarnings = [];
+    console.log('\nValidating chunks against cleaned text:', cleanedText);
     
     chunks.forEach((chunk, index) => {
+        console.log(`\nValidating chunk ${index + 1}:`, chunk);
         const chunkWarnings = [];
         
         if (chunk.startIndex !== (index === 0 ? 1 : chunks[index - 1].endIndex + 1)) {
-            const gapText = originalText.slice(index === 0 ? 0 : chunks[index - 1].endIndex, chunk.startIndex - 1);
+            const gapText = cleanedText.slice(index === 0 ? 0 : chunks[index - 1].endIndex, chunk.startIndex - 1);
             chunkWarnings.push(`Gap detected before this chunk. Gap content: "${gapText}"`);
         }
 
-        const chunkText = originalText.slice(chunk.startIndex - 1, chunk.endIndex);
+        const chunkText = cleanedText.slice(chunk.startIndex - 1, chunk.endIndex);
+        console.log(`Chunk text from cleaned text: "${chunkText}"`);
         const endsWithPeriod = chunkText.trim().match(/[.!?]$/);
 
         if (!endsWithPeriod) {
@@ -190,10 +231,95 @@ function validateChunks(chunks, originalText) {
         }
     });
 
-    if (chunks[chunks.length - 1].endIndex < originalText.length) {
-        const remainingText = originalText.slice(chunks[chunks.length - 1].endIndex);
+    if (chunks[chunks.length - 1].endIndex < cleanedText.length) {
+        const remainingText = cleanedText.slice(chunks[chunks.length - 1].endIndex);
         documentWarnings.push(`Unprocessed text remaining: "${remainingText}"`);
     }
 
     return documentWarnings;
+}
+
+async function cleanAndChunkDocument(text, maxChunkLength, filepath) {
+    try {
+        console.log('Starting clean and chunk process...');
+        console.log('Original text:', text);
+        
+        // First save the original document to get an ID
+        const document = await saveAnalysis(text, 'cleanAndChunk', { filepath });
+        console.log('Saved original document with ID:', document.id);
+
+        // Step 1: Clean the text
+        const cleanResponse = await openai.chat.completions.create({
+            model: OPENAI_SETTINGS.model,
+            messages: [
+                OPENAI_PROMPTS.cleanAndChunk.clean,
+                {
+                    role: "user",
+                    content: text
+                }
+            ],
+            ...(OPENAI_SETTINGS.model !== 'o1-preview' && {
+                response_format: { type: "json_object" }
+            })
+        });
+
+        console.log('Clean response received:', cleanResponse.choices[0].message.content);
+        await logLLMResponse(null, cleanResponse.choices[0].message.content, OPENAI_SETTINGS.model);
+        const cleanResult = JSON.parse(removeMarkdownFormatting(cleanResponse.choices[0].message.content));
+        console.log('Parsed clean result:', cleanResult);
+        
+        // Clean the text using the removal instructions
+        const cleanedText = cleanText(text, cleanResult.textToRemove, text);
+        console.log('Cleaned text:', cleanedText);
+        
+        // Save cleaned text to database using the document ID we got earlier
+        console.log('Saving cleaned version to database...');
+        await saveCleanedDocument(document.id, cleanedText);
+
+        // Step 2: Chunk the cleaned text
+        console.log('Starting chunking process on cleaned text...');
+        const chunkResponse = await openai.chat.completions.create({
+            model: OPENAI_SETTINGS.model,
+            messages: [
+                OPENAI_PROMPTS.cleanAndChunk.chunk(maxChunkLength),
+                {
+                    role: "user",
+                    content: cleanedText
+                }
+            ],
+            ...(OPENAI_SETTINGS.model !== 'o1-preview' && {
+                response_format: { type: "json_object" }
+            })
+        });
+
+        console.log('Chunk response received:', chunkResponse.choices[0].message.content);
+        await logLLMResponse(null, chunkResponse.choices[0].message.content, OPENAI_SETTINGS.model);
+        const chunkResult = JSON.parse(removeMarkdownFormatting(chunkResponse.choices[0].message.content));
+        console.log('Parsed chunk result:', chunkResult);
+
+        // Add actual text to chunks from the cleaned text
+        if (chunkResult.chunks) {
+            chunkResult.chunks = chunkResult.chunks.map(chunk => ({
+                ...chunk,
+                cleanedText: cleanedText.slice(chunk.startIndex - 1, chunk.endIndex)
+            }));
+        }
+
+        const warnings = validateChunks(chunkResult.chunks, cleanedText);
+        console.log('Validation warnings:', warnings);
+
+        const result = {
+            textToRemove: cleanResult.textToRemove,
+            chunks: chunkResult.chunks,
+            warnings
+        };
+
+        // Store chunks in database
+        await saveAnalysis(cleanedText, 'chunk', { ...result, filepath });
+        
+        return result;
+    } catch (error) {
+        console.error('Clean and chunk error:', error);
+        throw new Error(`Clean and chunk operation failed: ${error.message}`);
+    }
 }

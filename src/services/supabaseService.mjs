@@ -8,6 +8,14 @@ const supabase = createClient(
   process.env.SUPABASE_ANON_KEY
 )
 
+function removeMarkdownFormatting(text) {
+  return text.replace(/```[\s\S]*?```/g, match => {
+      // Extract content between backticks, removing the first line (```json)
+      const content = match.split('\n').slice(1, -1).join('\n');
+      return content;
+  });
+}
+
 export async function saveAnalysis(content, type, result) {
   try {
     console.log(`Saving ${type} analysis to Supabase...`)
@@ -16,7 +24,7 @@ export async function saveAnalysis(content, type, result) {
     const { data: document, error: docError } = await supabase
       .from('documents')
       .insert({
-        content,
+        content: removeMarkdownFormatting(content),
         type,
         warnings: result.warnings || [],
         original_filename: result.filepath ? result.filepath.split('/').pop() : 'unknown',
@@ -96,5 +104,30 @@ export async function getAnalysisByType(type) {
     console.error('Database error:', error.message)
     console.error('Full error:', error)
     throw error
+  }
+}
+
+export async function saveCleanedDocument(documentId, cleanedContent) {
+  try {
+    console.log('Saving cleaned content for document:', documentId);
+
+    // Save to cleaned_documents table
+    const { error: cleanError } = await supabase
+      .from('cleaned_documents')
+      .insert({
+        id: documentId,
+        cleaned_content: cleanedContent
+      });
+
+    if (cleanError) {
+      console.error('Clean error details:', cleanError);
+      throw new Error(`Error saving cleaned document: ${cleanError.message}`);
+    }
+
+    console.log('Successfully saved cleaned document');
+  } catch (error) {
+    console.error('Database error:', error.message);
+    console.error('Full error:', error);
+    throw error;
   }
 } 
