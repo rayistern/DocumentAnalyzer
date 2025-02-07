@@ -3,7 +3,7 @@ import { OPENAI_SETTINGS, OPENAI_PROMPTS } from '../config/settings.mjs';
 import { logLLMResponse } from './llmLoggingService.mjs';
 
 const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY
+    apiKey: "process.env.OPENAI_API_KEY"
 });
 
 export async function processFile(content, type, maxChunkLength = OPENAI_SETTINGS.defaultMaxChunkLength) {
@@ -46,6 +46,14 @@ function escapeRegExp(string) {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function removeMarkdownFormatting(text) {
+    return text.replace(/```[\s\S]*?```/g, match => {
+        // Extract content between backticks, removing the first line (```json)
+        const content = match.split('\n').slice(1, -1).join('\n');
+        return content;
+    });
+}
+
 async function createChunks(text, maxChunkLength) {
     try {
         const response = await openai.chat.completions.create({
@@ -67,7 +75,8 @@ async function createChunks(text, maxChunkLength) {
 
         await logLLMResponse(null, response.choices[0].message.content, OPENAI_SETTINGS.model);
 
-        const result = JSON.parse(response.choices[0].message.content);
+        const cleanResponse = removeMarkdownFormatting(response.choices[0].message.content);
+        const result = JSON.parse(cleanResponse);
 
         if (result.chunks && result.textToRemove) {
             result.chunks = result.chunks.map(chunk => {

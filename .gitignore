@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+
+# Keep package management files
+!package.json
+!package-lock.json
+!pyproject.toml
+!poetry.lock
+
+# Environment
+.env
+.env.*
+
+# Build/Output
+dist/
+build/
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+
+# IDE/Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Testing
+coverage/
+
+# Database
+*.sqlite
+*.db
+
+# Replit specific
+.replit
+replit.nix
+.config/
+
+# Cache
+.cache/
