@@ -242,7 +242,6 @@ function validateChunks(chunks, cleanedText) {
 async function cleanAndChunkDocument(text, maxChunkLength, filepath) {
     try {
         console.log('Starting clean and chunk process...');
-        console.log('Original text:', text);
         
         // First save the original document to get an ID
         const document = await saveAnalysis(text, 'cleanAndChunk', { filepath });
@@ -274,7 +273,7 @@ async function cleanAndChunkDocument(text, maxChunkLength, filepath) {
         
         // Save cleaned text to database using the document ID we got earlier
         console.log('Saving cleaned version to database...');
-        await saveCleanedDocument(document.id, cleanedText);
+        await saveCleanedDocument(document.id, cleanedText, text, OPENAI_SETTINGS.model);
 
         // Step 2: Chunk the cleaned text
         console.log('Starting chunking process on cleaned text...');

@@ -44,5 +44,6 @@ replit.nix
 # Cache
 .cache/
 
-.inputFiles/
-.outputFiles/
+inputFiles/
+processedFiles/
+tempTxt/

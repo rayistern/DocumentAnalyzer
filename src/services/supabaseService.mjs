@@ -107,7 +107,7 @@ export async function getAnalysisByType(type) {
   }
 }
 
-export async function saveCleanedDocument(documentId, cleanedContent) {
+export async function saveCleanedDocument(documentId, cleanedContent, originalDocument, llmModel) {
   try {
     console.log('Saving cleaned content for document:', documentId);
 
@@ -116,7 +116,9 @@ export async function saveCleanedDocument(documentId, cleanedContent) {
       .from('cleaned_documents')
       .insert({
         id: documentId,
-        cleaned_content: cleanedContent
+        cleaned_content: cleanedContent,
+        original_document: originalDocument,
+        llm_model: llmModel
       });
 
     if (cleanError) {

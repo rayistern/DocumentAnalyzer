@@ -2,6 +2,7 @@
 
 import { convertToText } from './utils/documentConverter.mjs';
 import { processFile } from './services/openaiService.mjs';
+import { Command } from 'commander';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -15,13 +16,14 @@ async function ensureDirectories() {
     await fs.mkdir(TEMP_DIR, { recursive: true });
 }
 
-async function processDocuments() {
+async function processDocuments(options) {
     try {
         await ensureDirectories();
         
         // Get all files from input directory
         const files = await fs.readdir(INPUT_DIR);
         console.log(`Found ${files.length} files to process`);
+        console.log(`Using chunk length: ${options.maxChunkLength}`);
         
         for (const file of files) {
             const inputPath = path.join(INPUT_DIR, file);
@@ -36,7 +38,7 @@ async function processDocuments() {
                 
                 // Step 2: Clean and chunk the text
                 console.log('Cleaning and chunking...');
-                const result = await processFile(text, 'cleanAndChunk', file);
+                const result = await processFile(text, 'cleanAndChunk', file, options.maxChunkLength);
                 
                 // Step 3: Move original file to processed directory
                 const processedPath = path.join(PROCESSED_DIR, file);
@@ -61,5 +63,14 @@ async function processDocuments() {
     }
 }
 
-// Run the processor
-processDocuments(); 
+const program = new Command();
+
+program
+    .name('document-processor')
+    .description('Process documents from inputFiles directory')
+    .option('-m, --max-chunk-length <length>', 'maximum length of chunks', '2000')
+    .action(async (options) => {
+        await processDocuments(options);
+    });
+
+program.parse(); 

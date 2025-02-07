@@ -22,3 +22,11 @@ export const chunks = pgTable('chunks', {
   warnings: text('warnings'),
   createdAt: timestamp('created_at').defaultNow()
 });
+
+export const cleanedDocuments = pgTable('cleaned_documents', {
+    id: integer('id').references(() => documents.id).primaryKey(),
+    cleaned_content: text('cleaned_content').notNull(),
+    original_document: text('original_document').notNull(),
+    llm_model: varchar('llm_model', { length: 50 }).notNull(),
+    createdAt: timestamp('created_at').defaultNow()
+});

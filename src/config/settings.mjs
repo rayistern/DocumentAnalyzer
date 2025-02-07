@@ -38,7 +38,7 @@ export const OPENAI_PROMPTS = {
             content: `Divide the following text into chunks, following these strict rules:
                 1. Each chunk MUST end with a complete sentence (ending with ., !, or ?)
                 2. Never split in the middle of a sentence
-                3. Keep each chunk under ${maxChunkLength} characters
+                3. Keep each chunk around ${maxChunkLength} characters
                 4. Start each chunk at the beginning of a sentence
                 5. Record the exact first and last complete words of each chunk for validation
                 6. The first chunk MUST start at index 1
