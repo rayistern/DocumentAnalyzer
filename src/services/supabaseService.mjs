@@ -8,6 +8,8 @@ const supabase = createClient(
   process.env.SUPABASE_ANON_KEY
 )
 
+export { supabase };
+
 function removeMarkdownFormatting(text) {
   return text.replace(/```[\s\S]*?```/g, match => {
       // Extract content between backticks, removing the first line (```json)
@@ -16,120 +18,203 @@ function removeMarkdownFormatting(text) {
   });
 }
 
-export async function saveAnalysis(content, type, result) {
-  try {
-    console.log(`Saving ${type} analysis to Supabase...`)
-    
-    // First save the document
-    const { data: document, error: docError } = await supabase
-      .from('documents')
-      .insert({
-        content: removeMarkdownFormatting(content),
-        type,
-        warnings: result.warnings || [],
-        original_filename: result.filepath ? result.filepath.split('/').pop() : 'unknown',
-        created_at: new Date().toISOString()
-      })
-      .select()
-      .single()
+export async function saveAnalysis(content, type, metadata = {}) {
+    try {
+        let documentSourceId;
+        let document;
+        
+        // For initial document processing, create source record
+        if (type === 'cleanAndChunk') {
+            const { data: sourceData, error: sourceError } = await supabase
+                .from('document_sources')
+                .insert({
+                    filename: metadata.filepath,
+                    original_content: content,
+                    status: 'processing'
+                })
+                .select()
+                .single();
+                
+            if (sourceError) throw sourceError;
+            documentSourceId = sourceData.id;
 
-    if (docError) {
-      console.error('Error saving document:', docError)
-      throw new Error(`Supabase document error: ${docError.message}`)
+            // Save initial document
+            const { data: docData, error: docError } = await supabase
+                .from('documents')
+                .insert({
+                    content,
+                    type,
+                    warnings: metadata.warnings || [],
+                    original_filename: metadata.filepath,
+                    document_source_id: documentSourceId
+                })
+                .select()
+                .single();
+
+            if (docError) throw docError;
+            document = docData;
+
+        } else if (type === 'chunk' && metadata.document_source_id) {
+            // For chunk processing, use existing document source id
+            documentSourceId = metadata.document_source_id;
+            document = metadata.document;
+        } else {
+            throw new Error('Invalid operation type or missing document source id');
+        }
+
+        // For chunks, save with source reference
+        if (metadata.chunks) {
+            const chunksToInsert = metadata.chunks
+                .filter(chunk => chunk.cleanedText && chunk.cleanedText.trim().length > 0)  // Filter out empty chunks
+                .map(chunk => ({
+                    document_id: document.id,
+                    document_source_id: documentSourceId,
+                    start_index: chunk.startIndex,
+                    end_index: chunk.endIndex,
+                    first_word: chunk.firstWord,
+                    last_word: chunk.lastWord,
+                    cleaned_text: chunk.cleanedText.trim(),
+                    original_text: content.slice(chunk.startIndex - 1, chunk.endIndex),
+                    warnings: Array.isArray(chunk.warnings) ? chunk.warnings.join('\n') : chunk.warnings,
+                    raw_metadata: chunk.metadata || null,
+                    created_at: new Date().toISOString()
+                }));
+
+            if (chunksToInsert.length > 0) {
+                const { error: chunksError } = await supabase
+                    .from('chunks')
+                    .insert(chunksToInsert);
+
+                if (chunksError) throw chunksError;
+            }
+        }
+
+        // Update source status when cleaned content is ready
+        if (type === 'cleanAndChunk' && content) {
+            const { error: updateError } = await supabase
+                .from('document_sources')
+                .update({ 
+                    cleaned_content: content,
+                    status: 'processed'
+                })
+                .eq('id', documentSourceId);
+
+            if (updateError) throw updateError;
+        }
+
+        return document;
+    } catch (error) {
+        console.error('Error saving to database:', error);
+        throw error;
     }
-
-    // If it's a chunk type, save individual chunks
-    if (type === 'chunk' && result.chunks) {
-      const chunksToInsert = result.chunks.map(chunk => ({
-        document_id: document.id,
-        start_index: chunk.startIndex,
-        end_index: chunk.endIndex,
-        first_word: chunk.firstWord,
-        last_word: chunk.lastWord,
-        cleaned_text: chunk.cleanedText,
-        original_text: chunk.originalText,
-        warnings: Array.isArray(chunk.warnings) ? chunk.warnings.join('\n') : chunk.warnings,
-        created_at: new Date().toISOString()
-      }))
-
-      const { error: chunksError } = await supabase
-        .from('chunks')
-        .insert(chunksToInsert)
-
-      if (chunksError) {
-        console.error('Error saving chunks:', chunksError)
-        throw new Error(`Supabase chunks error: ${chunksError.message}`)
-      }
-    }
-
-    console.log('Successfully saved document and chunks:', document.id)
-    return document
-  } catch (error) {
-    console.error('Database error:', error.message)
-    console.error('Full error:', error)
-    throw error
-  }
 }
 
 export async function getAnalysisByType(type) {
-  try {
-    console.log(`Fetching analyses of type: ${type}`)
-    const { data: documents, error: docsError } = await supabase
-      .from('documents')
-      .select('*')
-      .eq('type', type)
-      .order('created_at', { ascending: false })
+    try {
+        console.log(`Fetching analyses of type: ${type}`)
+        const { data: documents, error: docsError } = await supabase
+            .from('documents')
+            .select('*')
+            .eq('type', type)
+            .order('created_at', { ascending: false })
 
-    if (docsError) throw new Error(`Supabase error: ${docsError.message}`)
+        if (docsError) throw new Error(`Supabase error: ${docsError.message}`)
 
-    // If chunk type, fetch associated chunks
-    if (type === 'chunk' && documents.length > 0) {
-      const { data: chunks, error: chunksError } = await supabase
-        .from('chunks')
-        .select('*')
-        .in('document_id', documents.map(d => d.id))
-        .order('start_index', { ascending: true })
+        // If chunk type, fetch associated chunks
+        if (type === 'chunk' && documents.length > 0) {
+            const { data: chunks, error: chunksError } = await supabase
+                .from('chunks')
+                .select('*')
+                .in('document_id', documents.map(d => d.id))
+                .order('start_index', { ascending: true })
 
-      if (chunksError) throw new Error(`Supabase error: ${chunksError.message}`)
+            if (chunksError) throw new Error(`Supabase error: ${chunksError.message}`)
 
-      // Group chunks by document
-      return documents.map(doc => ({
-        ...doc,
-        chunks: chunks.filter(chunk => chunk.document_id === doc.id)
-      }))
+            // Group chunks by document
+            return documents.map(doc => ({
+                ...doc,
+                chunks: chunks.filter(chunk => chunk.document_id === doc.id)
+            }))
+        }
+
+        return documents
+    } catch (error) {
+        console.error('Database error:', error.message)
+        console.error('Full error:', error)
+        throw error
     }
-
-    return documents
-  } catch (error) {
-    console.error('Database error:', error.message)
-    console.error('Full error:', error)
-    throw error
-  }
 }
 
-export async function saveCleanedDocument(documentId, cleanedContent, originalDocument, llmModel) {
-  try {
-    console.log('Saving cleaned content for document:', documentId);
+export async function saveCleanedDocument(documentId, cleanedText, originalText, model) {
+    try {
+        // Get the document source id from the original document
+        const { data: document, error: docError } = await supabase
+            .from('documents')
+            .select('document_source_id')
+            .eq('id', documentId)
+            .single();
+            
+        if (docError) throw docError;
 
-    // Save to cleaned_documents table
-    const { error: cleanError } = await supabase
-      .from('cleaned_documents')
-      .insert({
-        id: documentId,
-        cleaned_content: cleanedContent,
-        original_document: originalDocument,
-        llm_model: llmModel
-      });
+        // Update the document source with cleaned content
+        const { error: updateError } = await supabase
+            .from('document_sources')
+            .update({ 
+                cleaned_content: cleanedText,
+                status: 'cleaned'
+            })
+            .eq('id', document.document_source_id);
 
-    if (cleanError) {
-      console.error('Clean error details:', cleanError);
-      throw new Error(`Error saving cleaned document: ${cleanError.message}`);
+        if (updateError) throw updateError;
+
+        return { success: true };
+    } catch (error) {
+        console.error('Error saving cleaned document:', error);
+        throw error;
     }
+}
 
-    console.log('Successfully saved cleaned document');
-  } catch (error) {
-    console.error('Database error:', error.message);
-    console.error('Full error:', error);
-    throw error;
-  }
-} 
+export async function saveChunkMetadata(documentId, chunkIndex, metadata) {
+    try {
+        console.log(`Saving metadata for document ${documentId}, chunk ${chunkIndex}...`);
+        
+        // Convert arrays to Postgres array format
+        const formattedMetadata = {
+            document_id: documentId,
+            chunk_index: chunkIndex,
+            long_summary: metadata.long_summary,
+            short_summary: metadata.short_summary,
+            quiz_questions: Array.isArray(metadata.quiz_questions) ? `{${metadata.quiz_questions.map(q => `"${q.replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            followup_thinking_questions: Array.isArray(metadata.followup_thinking_questions) ? `{${metadata.followup_thinking_questions.map(q => `"${q.replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            generated_title: metadata.generated_title,
+            tags_he: Array.isArray(metadata.tags_he) ? `{${metadata.tags_he.map(t => `"${t.replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            key_terms_he: Array.isArray(metadata.key_terms_he) ? `{${metadata.key_terms_he.map(t => `"${t.replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            key_phrases_he: Array.isArray(metadata.key_phrases_he) ? `{${metadata.key_phrases_he.map(p => `"${p.replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            key_phrases_en: Array.isArray(metadata.key_phrases_en) ? `{${metadata.key_phrases_en.map(p => `"${p.replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            bibliography_snippets: Array.isArray(metadata.bibliography_snippets) ? `{${metadata.bibliography_snippets.map(b => `"${JSON.stringify(b).replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            questions_explicit: Array.isArray(metadata.questions_explicit) ? `{${metadata.questions_explicit.map(q => `"${q.replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            questions_implied: Array.isArray(metadata.questions_implied) ? `{${metadata.questions_implied.map(q => `"${q.replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            reconciled_issues: Array.isArray(metadata.reconciled_issues) ? `{${metadata.reconciled_issues.map(i => `"${i.replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            qa_pair: metadata.qa_pair,
+            potential_typos: Array.isArray(metadata.potential_typos) ? `{${metadata.potential_typos.map(t => `"${t.replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            identified_abbreviations: Array.isArray(metadata.identified_abbreviations) ? `{${metadata.identified_abbreviations.map(a => `"${a.replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            named_entities: Array.isArray(metadata.named_entities) ? `{${metadata.named_entities.map(e => `"${e.replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            created_at: new Date().toISOString()
+        };
+
+        const { error } = await supabase
+            .from('chunk_metadata')
+            .insert(formattedMetadata);
+
+        if (error) {
+            console.error('Error saving chunk metadata:', error);
+            throw new Error(`Supabase metadata error: ${error.message}`);
+        }
+
+        console.log(`Successfully saved metadata for chunk ${chunkIndex}`);
+    } catch (error) {
+        console.error('Database error:', error.message);
+        console.error('Full error:', JSON.stringify(error, null, 2));
+        throw error;
+    }
+}

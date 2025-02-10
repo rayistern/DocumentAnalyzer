@@ -3,6 +3,7 @@ import { OPENAI_SETTINGS, OPENAI_PROMPTS } from '../config/settings.mjs';
 import { logLLMResponse } from './llmLoggingService.mjs';
 import { saveAnalysis, saveCleanedDocument } from './supabaseService.mjs';
 import dotenv from 'dotenv'
+import { supabase } from './supabaseService.mjs';
 
 dotenv.config()
 
@@ -247,11 +248,17 @@ async function cleanAndChunkDocument(text, maxChunkLength, filepath) {
         const document = await saveAnalysis(text, 'cleanAndChunk', { filepath });
         console.log('Saved original document with ID:', document.id);
 
+        // Create new session for this document
+        const currentSession = {
+            messages: [],
+            documentId: document.id
+        };
+
         // Step 1: Clean the text
         const cleanResponse = await openai.chat.completions.create({
             model: OPENAI_SETTINGS.model,
             messages: [
-                OPENAI_PROMPTS.cleanAndChunk.clean,
+                OPENAI_PROMPTS.cleanAndChunk.clean(),
                 {
                     role: "user",
                     content: text
@@ -314,7 +321,95 @@ async function cleanAndChunkDocument(text, maxChunkLength, filepath) {
         };
 
         // Store chunks in database
-        await saveAnalysis(cleanedText, 'chunk', { ...result, filepath });
+        await saveAnalysis(cleanedText, 'chunk', { 
+            ...result, 
+            filepath,
+            document_source_id: document.document_source_id,
+            document: document 
+        });
+        
+        // Step 3: Generate metadata for each chunk
+        if (chunkResult.chunks) {
+            console.log('Generating metadata for chunks...');
+            for (let i = 0; i < chunkResult.chunks.length; i++) {
+                const chunk = chunkResult.chunks[i];
+                console.log(`Generating metadata for chunk ${i + 1}/${chunkResult.chunks.length}...`);
+                try {
+                    const response = await openai.chat.completions.create({
+                        model: OPENAI_SETTINGS.model,
+                        messages: [
+                            OPENAI_PROMPTS.metadata(),
+                            {
+                                role: "user",
+                                content: chunk.cleanedText
+                            }
+                        ],
+                        ...(OPENAI_SETTINGS.model !== 'o1-preview' && {
+                            response_format: { type: "json_object" }
+                        })
+                    });
+
+                    await logLLMResponse(null, response.choices[0].message.content, OPENAI_SETTINGS.model);
+                    
+                    // Parse the metadata JSON
+                    const metadata = JSON.parse(removeMarkdownFormatting(response.choices[0].message.content));
+                    
+                    // Store raw response in chunk for backup
+                    chunk.metadata = response.choices[0].message.content;
+                    
+                    // Save parsed metadata to chunk_metadata table
+                    const { error: metadataError } = await supabase
+                        .from('chunk_metadata')
+                        .upsert({ 
+                            document_id: document.id,
+                            chunk_index: chunk.startIndex,
+                            long_summary: metadata.long_summary,
+                            short_summary: metadata.short_summary,
+                            quiz_questions: metadata.quiz_questions,
+                            followup_thinking_questions: metadata.followup_thinking_questions,
+                            generated_title: metadata.generated_title,
+                            tags_he: metadata.tags_he,
+                            key_terms_he: metadata.key_terms_he,
+                            key_phrases_he: metadata.key_phrases_he,
+                            key_phrases_en: metadata.key_phrases_en,
+                            bibliography_snippets: metadata.bibliography_snippets,
+                            questions_explicit: metadata.questions_explicit,
+                            questions_implied: metadata.questions_implied,
+                            reconciled_issues: metadata.reconciled_issues,
+                            qa_pair: metadata.qa_pair,
+                            potential_typos: metadata.potential_typos,
+                            identified_abbreviations: metadata.identified_abbreviations,
+                            named_entities: metadata.named_entities
+                        }, { 
+                            onConflict: 'document_id,chunk_index',
+                            ignoreDuplicates: false 
+                        });
+
+                    if (metadataError) {
+                        console.error(`Error saving metadata for chunk ${i + 1}:`, metadataError);
+                    } else {
+                        console.log(`Successfully saved metadata for chunk ${i + 1}`);
+                    }
+
+                    // Update the chunk with raw metadata as backup
+                    const { error: updateError } = await supabase
+                        .from('chunks')
+                        .update({ 
+                            raw_metadata: response.choices[0].message.content
+                        })
+                        .eq('document_id', document.id)
+                        .eq('start_index', chunk.startIndex);
+
+                    if (updateError) {
+                        console.error(`Error updating metadata for chunk ${i + 1}:`, updateError);
+                    } else {
+                        console.log(`Successfully updated metadata for chunk ${i + 1}`);
+                    }
+                } catch (error) {
+                    console.error(`Error generating metadata for chunk ${i + 1}:`, error);
+                }
+            }
+        }
         
         return result;
     } catch (error) {

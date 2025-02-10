@@ -1,14 +1,14 @@
 export const OPENAI_SETTINGS = {
-    model: "o1-preview",  // newest model as of May 13, 2024
+    model: "o3-mini",  // newest model as of May 13, 2024
     defaultMaxChunkLength: 2000,
     textRemovalPositionTolerance: 5  // Maximum character difference allowed for text removal positions
 };
 
 export const OPENAI_PROMPTS = {
     cleanAndChunk: {
-        clean: {
+        clean: (overview = '') => ({
             role: "user",
-            content: `Identify any text that should be removed from this document, such as:
+            content: `${overview ? overview + '\n\n' : ''}Identify any text that should be removed from this document, such as:
                 - Page numbers and headers (e.g., "Page 1", "Chapter 1:")
                 - Divider lines (e.g., "----------")
                 - Headers and footers
@@ -32,7 +32,7 @@ export const OPENAI_PROMPTS = {
                         }
                     ]
                 }`
-        },
+        }),
         chunk: (maxChunkLength) => ({
             role: "user",
             content: `Divide the following text into chunks, following these strict rules:
@@ -45,6 +45,7 @@ export const OPENAI_PROMPTS = {
                 7. Each subsequent chunk MUST start right after the previous chunk's ending punctuation
                 8. There MUST NOT be any gaps or overlaps between chunks
                 9. Include all punctuation in the chunks
+                10. Remember that this is Hebrew text, so some characters operate differently than in English and may not indicate the end of a sentence
 
                 Return a valid JSON in the following exact format (no preface):
                 {
@@ -92,5 +93,28 @@ export const OPENAI_PROMPTS = {
                     }
                 ]
             }`
-    }
+    },
+    metadata: () => ({
+        role: "user",
+        content: `Analyze the given text chunk and provide detailed metadata in JSON format. Each piece of metadata needs to be standalone, not using ambiguous references like 'the text'. Include:
+    - long_summary (2-3 paragraphs, in English)
+    - short_summary (1-2 sentences, in English)
+    - quiz_questions (3-5 questions testing comprehension, in English)
+    - followup_thinking_questions (2-3 deeper analytical questions, in English)
+    - generated_title (in English)
+    - tags_he (Hebrew, keywords)
+    - key_terms_he (domain specific terms/phrases, in the original Hebrew)
+    - key_phrases_he (important Hebrew quotes)
+    - key_phrases_en (English translations of key phrases)
+    - bibliography_snippets (array of explicit citations {snippet, source}, Original Hebrew)
+    - questions_explicit (directly stated in text, Original Hebrew)
+    - questions_implied (suggested by the content, English)
+    - reconciled_issues (how the text resolves contradictions, English)
+    - qa_pair (one detailed question and answer, English)
+    - potential_typos (array of possible errors, Original Hebrew)
+    - identified_abbreviations (array of abbreviations with expansions, Original Hebrew)
+    - named_entities (array of people, places, texts mentioned, Original Hebrew)
+
+Return valid JSON only, no markdown.`
+    })
 };
