@@ -352,43 +352,54 @@ async function cleanAndChunkDocument(text, maxChunkLength, filepath) {
                     await logLLMResponse(null, response.choices[0].message.content, OPENAI_SETTINGS.model);
                     
                     // Parse the metadata JSON
+                    console.log('Raw metadata response:', response.choices[0].message.content);
                     const metadata = JSON.parse(removeMarkdownFormatting(response.choices[0].message.content));
+                    console.log('Parsed metadata:', metadata);
                     
                     // Store raw response in chunk for backup
                     chunk.metadata = response.choices[0].message.content;
                     
+                    // Prepare metadata object for insertion with all fields
+                    const metadataObject = { 
+                        document_id: document.id,
+                        chunk_index: chunk.startIndex,
+                        long_summary: metadata.long_summary,
+                        short_summary: metadata.short_summary,
+                        quiz_questions: Array.isArray(metadata.quiz_questions) ? metadata.quiz_questions : null,
+                        followup_thinking_questions: Array.isArray(metadata.followup_thinking_questions) ? metadata.followup_thinking_questions : null,
+                        generated_title: metadata.generated_title,
+                        tags_he: Array.isArray(metadata.tags_he) ? metadata.tags_he : null,
+                        key_terms_he: Array.isArray(metadata.key_terms_he) ? metadata.key_terms_he : null,
+                        key_phrases_he: Array.isArray(metadata.key_phrases_he) ? metadata.key_phrases_he : null,
+                        key_phrases_en: Array.isArray(metadata.key_phrases_en) ? metadata.key_phrases_en : null,
+                        bibliography_snippets: Array.isArray(metadata.bibliography_snippets) ? metadata.bibliography_snippets : null,
+                        questions_explicit: Array.isArray(metadata.questions_explicit) ? metadata.questions_explicit : null,
+                        questions_implied: Array.isArray(metadata.questions_implied) ? metadata.questions_implied : null,
+                        reconciled_issues: metadata.reconciled_issues ? [metadata.reconciled_issues] : null,
+                        qa_pair: metadata.qa_pair ? JSON.stringify(metadata.qa_pair) : null,
+                        potential_typos: Array.isArray(metadata.potential_typos) ? metadata.potential_typos : null,
+                        identified_abbreviations: Array.isArray(metadata.identified_abbreviations) ? metadata.identified_abbreviations : null,
+                        named_entities: Array.isArray(metadata.named_entities) ? metadata.named_entities : null
+                    };
+                    console.log('Attempting to save metadata object:', metadataObject);
+
                     // Save parsed metadata to chunk_metadata table
-                    const { error: metadataError } = await supabase
+                    const { data: metadataData, error: metadataError } = await supabase
                         .from('chunk_metadata')
-                        .upsert({ 
-                            document_id: document.id,
-                            chunk_index: chunk.startIndex,
-                            long_summary: metadata.long_summary,
-                            short_summary: metadata.short_summary,
-                            quiz_questions: metadata.quiz_questions,
-                            followup_thinking_questions: metadata.followup_thinking_questions,
-                            generated_title: metadata.generated_title,
-                            tags_he: metadata.tags_he,
-                            key_terms_he: metadata.key_terms_he,
-                            key_phrases_he: metadata.key_phrases_he,
-                            key_phrases_en: metadata.key_phrases_en,
-                            bibliography_snippets: metadata.bibliography_snippets,
-                            questions_explicit: metadata.questions_explicit,
-                            questions_implied: metadata.questions_implied,
-                            reconciled_issues: metadata.reconciled_issues,
-                            qa_pair: metadata.qa_pair,
-                            potential_typos: metadata.potential_typos,
-                            identified_abbreviations: metadata.identified_abbreviations,
-                            named_entities: metadata.named_entities
-                        }, { 
+                        .upsert(metadataObject, { 
                             onConflict: 'document_id,chunk_index',
                             ignoreDuplicates: false 
                         });
 
                     if (metadataError) {
                         console.error(`Error saving metadata for chunk ${i + 1}:`, metadataError);
+                        console.error('Failed metadata object:', metadataObject);
+                        console.error('Error details:', metadataError.details);
+                        console.error('Error message:', metadataError.message);
+                        console.error('Error code:', metadataError.code);
                     } else {
                         console.log(`Successfully saved metadata for chunk ${i + 1}`);
+                        console.log('Saved metadata data:', metadataData);
                     }
 
                     // Update the chunk with raw metadata as backup
