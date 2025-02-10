@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { OPENAI_SETTINGS, OPENAI_PROMPTS } from '../config/settings.mjs';
 import { logLLMResponse } from './llmLoggingService.mjs';
 import { saveAnalysis, saveCleanedDocument } from './supabaseService.mjs';
+import { preChunkText, shouldUseSimplifiedPrompt } from './preChunkingService.mjs';
 import dotenv from 'dotenv'
 import { supabase } from './supabaseService.mjs';
 
@@ -240,6 +241,21 @@ function validateChunks(chunks, cleanedText) {
     return documentWarnings;
 }
 
+function findCompleteBoundary(text, position, lastWord, tolerance = 25) {
+    // Look for the last word within tolerance range
+    const start = Math.max(0, position - tolerance);
+    const end = Math.min(text.length, position + tolerance);
+    const searchText = text.substring(start, end);
+    
+    // Find the last word in this range
+    const wordIndex = searchText.indexOf(lastWord);
+    if (wordIndex !== -1) {
+        return start + wordIndex + lastWord.length;
+    }
+    
+    return position; // Fallback to original position
+}
+
 async function cleanAndChunkDocument(text, maxChunkLength, filepath) {
     try {
         console.log('Starting clean and chunk process...');
@@ -254,86 +270,268 @@ async function cleanAndChunkDocument(text, maxChunkLength, filepath) {
             documentId: document.id
         };
 
-        // Step 1: Clean the text
-        const cleanResponse = await openai.chat.completions.create({
-            model: OPENAI_SETTINGS.model,
-            messages: [
-                OPENAI_PROMPTS.cleanAndChunk.clean(),
-                {
-                    role: "user",
-                    content: text
-                }
-            ],
-            ...(OPENAI_SETTINGS.model !== 'o1-preview' && {
-                response_format: { type: "json_object" }
-            })
-        });
-
-        console.log('Clean response received:', cleanResponse.choices[0].message.content);
-        await logLLMResponse(null, cleanResponse.choices[0].message.content, OPENAI_SETTINGS.model);
-        const cleanResult = JSON.parse(removeMarkdownFormatting(cleanResponse.choices[0].message.content));
-        console.log('Parsed clean result:', cleanResult);
+        // Pre-chunk the text
+        const preChunks = preChunkText(text, OPENAI_SETTINGS.preChunkSize);
+        console.log(`Created ${preChunks.length} pre-chunks`);
         
-        // Clean the text using the removal instructions
-        const cleanedText = cleanText(text, cleanResult.textToRemove, text);
-        console.log('Cleaned text:', cleanedText);
-        
-        // Save cleaned text to database using the document ID we got earlier
-        console.log('Saving cleaned version to database...');
-        await saveCleanedDocument(document.id, cleanedText, text, OPENAI_SETTINGS.model);
+        let cleanedChunks = [];
+        let allTextToRemove = [];
+        let remainderText = '';
 
-        // Step 2: Chunk the cleaned text
-        console.log('Starting chunking process on cleaned text...');
-        const chunkResponse = await openai.chat.completions.create({
-            model: OPENAI_SETTINGS.model,
-            messages: [
-                OPENAI_PROMPTS.cleanAndChunk.chunk(maxChunkLength),
+        // Process each pre-chunk
+        for (let i = 0; i < preChunks.length; i++) {
+            console.log(`\nProcessing pre-chunk ${i + 1}/${preChunks.length}...`);
+            
+            // Combine remainder with current chunk
+            const chunk = preChunks[i];
+            const combinedText = remainderText + chunk.text;
+            console.log(`Combined text length: ${combinedText.length} (${remainderText.length} from remainder)`);
+
+            // Save this pre-chunk to database (after combining with remainder)
+            const { error: prechunkError } = await supabase
+                .from('prechunks')
+                .insert({
+                    document_id: document.id,
+                    chunk_index: i,
+                    text: chunk.text,
+                    start_position: chunk.startPosition,
+                    end_position: chunk.endPosition,
+                    is_complete: Boolean(chunk.isComplete),
+                    created_at: new Date().toISOString(),
+                    remainder_text: remainderText,
+                    remainder_length: remainderText.length
+                });
+
+            if (prechunkError) {
+                console.error(`Error saving pre-chunk ${i + 1}:`, prechunkError);
+            } else {
+                console.log(`Saved pre-chunk ${i + 1} to database`);
+            }
+
+            // Step 1: Clean the text chunk
+            console.log('Cleaning text chunk...');
+            const cleanResponse = await openai.chat.completions.create({
+                model: OPENAI_SETTINGS.model,
+                messages: [
+                    OPENAI_PROMPTS.cleanAndChunk.clean('', !chunk.isComplete),
+                    {
+                        role: "user",
+                        content: combinedText
+                    }
+                ],
+                ...(OPENAI_SETTINGS.model !== 'o1-preview' && {
+                    response_format: { type: "json_object" }
+                })
+            });
+
+            console.log('Clean response received');
+            await logLLMResponse(null, cleanResponse.choices[0].message.content, OPENAI_SETTINGS.model);
+            const cleanResult = JSON.parse(removeMarkdownFormatting(cleanResponse.choices[0].message.content));
+            console.log('Parsed clean result');
+            
+            // Adjust positions of textToRemove based on chunk start position
+            if (cleanResult.textToRemove) {
+                cleanResult.textToRemove = cleanResult.textToRemove.map(item => ({
+                    ...item,
+                    startPosition: item.startPosition + chunk.startPosition - remainderText.length - 1,
+                    endPosition: item.endPosition + chunk.startPosition - remainderText.length - 1
+                }));
+                allTextToRemove = [...allTextToRemove, ...cleanResult.textToRemove];
+            }
+
+            // Clean the combined text
+            const cleanedText = cleanText(combinedText, cleanResult.textToRemove, combinedText);
+            console.log(`Cleaned text length: ${cleanedText.length}`);
+            console.log('First 100 chars of cleaned text:', cleanedText.substring(0, 100));
+
+            console.log('\nText being sent to LLM for chunking:');
+            console.log('----------------------------------------');
+            console.log(cleanedText);
+            console.log('----------------------------------------\n');
+            
+            const messages = [
+                OPENAI_PROMPTS.cleanAndChunk.chunk(maxChunkLength, !chunk.isComplete),
                 {
                     role: "user",
                     content: cleanedText
                 }
-            ],
-            ...(OPENAI_SETTINGS.model !== 'o1-preview' && {
+            ];
+
+            console.log('\nFull API call:');
+            console.log('----------------------------------------');
+            console.log(JSON.stringify({
+                model: OPENAI_SETTINGS.model,
+                messages,
                 response_format: { type: "json_object" }
-            })
-        });
+            }, null, 2));
+            console.log('----------------------------------------\n');
+            
+            const chunkResponse = await openai.chat.completions.create({
+                model: OPENAI_SETTINGS.model,
+                messages,
+                ...(OPENAI_SETTINGS.model !== 'o1-preview' && {
+                    response_format: { type: "json_object" }
+                })
+            });
 
-        console.log('Chunk response received:', chunkResponse.choices[0].message.content);
-        await logLLMResponse(null, chunkResponse.choices[0].message.content, OPENAI_SETTINGS.model);
-        const chunkResult = JSON.parse(removeMarkdownFormatting(chunkResponse.choices[0].message.content));
-        console.log('Parsed chunk result:', chunkResult);
+            console.log('\nLLM Response Analysis:');
+            console.log('----------------------------------------');
+            const parsedResponse = JSON.parse(removeMarkdownFormatting(chunkResponse.choices[0].message.content));
+            if (parsedResponse.chunks) {
+                console.log(`Number of chunks returned: ${parsedResponse.chunks.length}`);
+                parsedResponse.chunks.forEach((c, i) => {
+                    console.log(`\nChunk ${i + 1}:`);
+                    console.log(`Start: ${c.startIndex}, End: ${c.endIndex}`);
+                    console.log(`Text: ${c.cleanedText}`);
+                });
+            }
+            console.log('----------------------------------------\n');
 
-        // Add actual text to chunks from the cleaned text
-        if (chunkResult.chunks) {
-            chunkResult.chunks = chunkResult.chunks.map(chunk => ({
-                ...chunk,
-                cleanedText: cleanedText.slice(chunk.startIndex - 1, chunk.endIndex)
-            }));
+            const chunkResult = parsedResponse;
+
+            // Process chunks and determine remainder
+            if (chunkResult.chunks) {
+                console.log('\nPre-chunk info:');
+                console.log(`Start position: ${chunk.startPosition}`);
+                console.log(`End position: ${chunk.endPosition}`);
+                console.log(`Remainder length: ${remainderText.length}`);
+                console.log(`Combined text length: ${combinedText.length}`);
+                console.log(`Cleaned text length: ${cleanedText.length}`);
+
+                let cumulativeOffset = 0;  // Track cumulative position differences
+                chunkResult.chunks = chunkResult.chunks.map(c => {
+                    // Debug output
+                    console.log('\n=== Chunk processing ===');
+                    console.log('LLM returned:');
+                    console.log(`- Positions: ${c.startIndex}-${c.endIndex}`);
+                    console.log(`- First word: "${c.firstWord}"`);
+                    console.log(`- Last word: "${c.lastWord}"`);
+                    console.log(`- Full text:\n${c.cleanedText}`);
+                    
+                    // Get text from LLM's positions in cleaned text, adjusted by cumulative offset
+                    const localStartIndex = c.startIndex - 1 + cumulativeOffset;
+                    const suggestedEndIndex = c.endIndex + cumulativeOffset;
+                    const adjustedEndIndex = findCompleteBoundary(cleanedText, suggestedEndIndex, c.lastWord);
+                    
+                    // Update cumulative offset for next chunk
+                    const newOffset = suggestedEndIndex - adjustedEndIndex;  // If we went further than LLM wanted, this will be negative
+                    cumulativeOffset -= newOffset;  // Subtract the offset to move in the right direction
+                    console.log(`Offset for this chunk: ${newOffset}, Cumulative offset: ${cumulativeOffset}`);
+
+                    const chunkText = cleanedText.substring(localStartIndex, adjustedEndIndex);
+                    
+                    console.log('\nOur calculation:');
+                    console.log(`- Text length: ${chunkText.length}`);
+                    console.log(`- Text from cleaned text:\n${chunkText}`);
+                    
+                    // Find where the period actually is
+                    const periodIndex = cleanedText.indexOf('.', localStartIndex);
+                    console.log('\nPosition analysis:');
+                    console.log(`- LLM wants to end at: ${c.endIndex}`);
+                    console.log(`- Next period is at: ${periodIndex}`);
+                    console.log(`- Text up to period:\n${cleanedText.substring(localStartIndex, periodIndex + 1)}`);
+                    console.log(`- Text after period:\n${cleanedText.substring(periodIndex + 1, c.endIndex)}`);
+                    
+                    // Verify first/last words
+                    const words = chunkText.trim().split(/\s+/);
+                    const actualFirstWord = words[0];
+                    const actualLastWord = words[words.length - 1];
+                    
+                    console.log('\nWord matching:');
+                    console.log(`- First word match: ${actualFirstWord === c.firstWord ? 'YES' : 'NO'}`);
+                    console.log(`  LLM: "${c.firstWord}"`);
+                    console.log(`  Our: "${actualFirstWord}"`);
+                    console.log(`- Last word match: ${actualLastWord === c.lastWord ? 'YES' : 'NO'}`);
+                    console.log(`  LLM: "${c.lastWord}"`);
+                    console.log(`  Our: "${actualLastWord}"`);
+
+                    // Get both original and cleaned text for this chunk
+                    const originalChunkText = combinedText.substring(localStartIndex, adjustedEndIndex);
+
+                    return {
+                        startIndex: localStartIndex + 1, // Keep 1-indexed for consistency with LLM
+                        endIndex: adjustedEndIndex,
+                        firstWord: actualFirstWord,
+                        lastWord: actualLastWord,
+                        cleanedText: chunkText,
+                        original_text: originalChunkText
+                    };
+                });
+
+                // Get remainder from cleaned text
+                const lastChunk = chunkResult.chunks[chunkResult.chunks.length - 1];
+                remainderText = cleanedText.substring(lastChunk.endIndex);
+                console.log(`\nRemainder text length: ${remainderText.length}`);
+                if (remainderText.length > 0) {
+                    console.log(`Remainder starts with: "${remainderText.slice(0, 50)}..."`);
+                }
+
+                // Save all chunks from LLM
+                cleanedChunks = [...cleanedChunks, ...chunkResult.chunks];
+                
+                // Save chunks to database immediately
+                const { error: chunksError } = await supabase
+                    .from('chunks')
+                    .insert(chunkResult.chunks.map(c => ({
+                        document_id: document.id,
+                        document_source_id: document.document_source_id,
+                        start_index: c.startIndex,
+                        end_index: c.endIndex,
+                        first_word: c.firstWord,
+                        last_word: c.lastWord,
+                        cleaned_text: c.cleanedText,
+                        original_text: c.original_text,
+                        warnings: Array.isArray(c.warnings) ? c.warnings.join('\n') : null,
+                        created_at: new Date().toISOString()
+                    })));
+
+                if (chunksError) {
+                    console.error('Error saving chunks:', chunksError);
+                } else {
+                    console.log(`Saved ${chunkResult.chunks.length} chunks to database`);
+                }
+            } else {
+                remainderText = cleanedText;
+                console.log('No chunks returned, entire text is remainder');
+            }
         }
 
-        const warnings = validateChunks(chunkResult.chunks, cleanedText);
+        // Handle final remainder if any
+        if (remainderText.trim()) {
+            console.log(`Processing final remainder of length ${remainderText.length}`);
+            cleanedChunks.push({
+                startIndex: text.length - remainderText.length + 1,
+                endIndex: text.length,
+                cleanedText: remainderText,
+                firstWord: remainderText.trim().split(/\s+/)[0],
+                lastWord: remainderText.trim().split(/\s+/).pop()
+            });
+        }
+
+        const warnings = validateChunks(cleanedChunks, text);
         console.log('Validation warnings:', warnings);
 
         const result = {
-            textToRemove: cleanResult.textToRemove,
-            chunks: chunkResult.chunks,
+            textToRemove: allTextToRemove,
+            chunks: cleanedChunks,
             warnings
         };
 
         // Store chunks in database
-        await saveAnalysis(cleanedText, 'chunk', { 
+        console.log('Storing results in database...');
+        await saveAnalysis(text, 'chunk', { 
             ...result, 
             filepath,
             document_source_id: document.document_source_id,
             document: document 
         });
         
-        // Step 3: Generate metadata for each chunk
-        if (chunkResult.chunks) {
-            console.log('Generating metadata for chunks...');
-            for (let i = 0; i < chunkResult.chunks.length; i++) {
-                const chunk = chunkResult.chunks[i];
-                console.log(`Generating metadata for chunk ${i + 1}/${chunkResult.chunks.length}...`);
+        // Generate metadata for chunks
+        if (cleanedChunks.length > 0) {
+            console.log(`\nGenerating metadata for ${cleanedChunks.length} chunks...`);
+            for (let i = 0; i < cleanedChunks.length; i++) {
+                const chunk = cleanedChunks[i];
+                console.log(`\nGenerating metadata for chunk ${i + 1}/${cleanedChunks.length}...`);
                 try {
                     const response = await openai.chat.completions.create({
                         model: OPENAI_SETTINGS.model,
@@ -349,60 +547,13 @@ async function cleanAndChunkDocument(text, maxChunkLength, filepath) {
                         })
                     });
 
+                    console.log('Metadata response received');
                     await logLLMResponse(null, response.choices[0].message.content, OPENAI_SETTINGS.model);
-                    
-                    // Parse the metadata JSON
-                    console.log('Raw metadata response:', response.choices[0].message.content);
-                    const metadata = JSON.parse(removeMarkdownFormatting(response.choices[0].message.content));
-                    console.log('Parsed metadata:', metadata);
-                    
-                    // Store raw response in chunk for backup
                     chunk.metadata = response.choices[0].message.content;
+                    console.log('Metadata parsed and stored in chunk');
                     
-                    // Prepare metadata object for insertion with all fields
-                    const metadataObject = { 
-                        document_id: document.id,
-                        chunk_index: chunk.startIndex,
-                        long_summary: metadata.long_summary,
-                        short_summary: metadata.short_summary,
-                        quiz_questions: Array.isArray(metadata.quiz_questions) ? metadata.quiz_questions : null,
-                        followup_thinking_questions: Array.isArray(metadata.followup_thinking_questions) ? metadata.followup_thinking_questions : null,
-                        generated_title: metadata.generated_title,
-                        tags_he: Array.isArray(metadata.tags_he) ? metadata.tags_he : null,
-                        key_terms_he: Array.isArray(metadata.key_terms_he) ? metadata.key_terms_he : null,
-                        key_phrases_he: Array.isArray(metadata.key_phrases_he) ? metadata.key_phrases_he : null,
-                        key_phrases_en: Array.isArray(metadata.key_phrases_en) ? metadata.key_phrases_en : null,
-                        bibliography_snippets: Array.isArray(metadata.bibliography_snippets) ? metadata.bibliography_snippets : null,
-                        questions_explicit: Array.isArray(metadata.questions_explicit) ? metadata.questions_explicit : null,
-                        questions_implied: Array.isArray(metadata.questions_implied) ? metadata.questions_implied : null,
-                        reconciled_issues: metadata.reconciled_issues ? [metadata.reconciled_issues] : null,
-                        qa_pair: metadata.qa_pair ? JSON.stringify(metadata.qa_pair) : null,
-                        potential_typos: Array.isArray(metadata.potential_typos) ? metadata.potential_typos : null,
-                        identified_abbreviations: Array.isArray(metadata.identified_abbreviations) ? metadata.identified_abbreviations : null,
-                        named_entities: Array.isArray(metadata.named_entities) ? metadata.named_entities : null
-                    };
-                    console.log('Attempting to save metadata object:', metadataObject);
-
-                    // Save parsed metadata to chunk_metadata table
-                    const { data: metadataData, error: metadataError } = await supabase
-                        .from('chunk_metadata')
-                        .upsert(metadataObject, { 
-                            onConflict: 'document_id,chunk_index',
-                            ignoreDuplicates: false 
-                        });
-
-                    if (metadataError) {
-                        console.error(`Error saving metadata for chunk ${i + 1}:`, metadataError);
-                        console.error('Failed metadata object:', metadataObject);
-                        console.error('Error details:', metadataError.details);
-                        console.error('Error message:', metadataError.message);
-                        console.error('Error code:', metadataError.code);
-                    } else {
-                        console.log(`Successfully saved metadata for chunk ${i + 1}`);
-                        console.log('Saved metadata data:', metadataData);
-                    }
-
-                    // Update the chunk with raw metadata as backup
+                    // Update metadata in database
+                    console.log('Updating metadata in database...');
                     const { error: updateError } = await supabase
                         .from('chunks')
                         .update({ 
@@ -412,12 +563,10 @@ async function cleanAndChunkDocument(text, maxChunkLength, filepath) {
                         .eq('start_index', chunk.startIndex);
 
                     if (updateError) {
-                        console.error(`Error updating metadata for chunk ${i + 1}:`, updateError);
-                    } else {
-                        console.log(`Successfully updated metadata for chunk ${i + 1}`);
+                        console.error(`Error updating metadata in database: ${updateError.message}`);
                     }
-                } catch (error) {
-                    console.error(`Error generating metadata for chunk ${i + 1}:`, error);
+                } catch (metadataError) {
+                    console.error(`Error generating metadata for chunk ${i + 1}:`, metadataError);
                 }
             }
         }

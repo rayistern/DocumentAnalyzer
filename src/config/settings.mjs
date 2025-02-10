@@ -1,14 +1,15 @@
 export const OPENAI_SETTINGS = {
     model: "o3-mini",  // newest model as of May 13, 2024
-    defaultMaxChunkLength: 2000,
-    textRemovalPositionTolerance: 5  // Maximum character difference allowed for text removal positions
+    defaultMaxChunkLength: 500,
+    textRemovalPositionTolerance: 5,  // Maximum character difference allowed for text removal positions
+    preChunkSize: 1500  // Size for pre-chunking before LLM processing
 };
 
 export const OPENAI_PROMPTS = {
     cleanAndChunk: {
-        clean: (overview = '') => ({
+        clean: (overview = '', isIncomplete = false) => ({
             role: "user",
-            content: `${overview ? overview + '\n\n' : ''}Identify any text that should be removed from this document, such as:
+            content: `${overview ? overview + '\n\n' : ''}Identify any text that should be removed from this document${isIncomplete ? ' (note: this text may be cut off at the end, please ignore any incomplete text)' : ''}, such as:
                 - Page numbers and headers (e.g., "Page 1", "Chapter 1:")
                 - Divider lines (e.g., "----------")
                 - Headers and footers
@@ -33,19 +34,17 @@ export const OPENAI_PROMPTS = {
                     ]
                 }`
         }),
-        chunk: (maxChunkLength) => ({
+        chunk: (maxChunkLength, isIncomplete = false) => ({
             role: "user",
-            content: `Divide the following text into chunks, following these strict rules:
-                1. Each chunk MUST end with a complete sentence (ending with ., !, or ?)
-                2. Never split in the middle of a sentence
-                3. Keep each chunk around ${maxChunkLength} characters
-                4. Start each chunk at the beginning of a sentence
-                5. Record the exact first and last complete words of each chunk for validation
-                6. The first chunk MUST start at index 1
-                7. Each subsequent chunk MUST start right after the previous chunk's ending punctuation
-                8. There MUST NOT be any gaps or overlaps between chunks
-                9. Include all punctuation in the chunks
-                10. Remember that this is Hebrew text, so some characters operate differently than in English and may not indicate the end of a sentence
+            content: `Divide the following text into chunks${isIncomplete ? ' (note: this text may be cut off at the end, please ignore any incomplete text)' : ''}, following these strict rules:
+                - The goal is logical, thematic chunking.
+                - Keep each chunk around ${maxChunkLength} characters
+                - Record the exact first and last complete words of each chunk for validation
+                - Each subsequent chunk MUST start right after the previous chunk's ending punctuation
+                - There MUST NOT be any gaps or overlaps between chunks
+                - Include all punctuation in the chunks
+                - Remember that this is Hebrew text, so some characters operate differently than in English and may not indicate the end of a sentence
+                - For each chunk, include the complete text of that chunk in the cleanedText field
 
                 Return a valid JSON in the following exact format (no preface):
                 {
@@ -54,7 +53,8 @@ export const OPENAI_PROMPTS = {
                             "startIndex": 1,
                             "endIndex": 23,
                             "firstWord": "The",
-                            "lastWord": "mat."
+                            "lastWord": "mat.",
+                            "cleanedText": "actual text of the chunk"
                         }
                     ]
                 }`
@@ -88,8 +88,7 @@ export const OPENAI_PROMPTS = {
                         "startIndex": 1,
                         "endIndex": 23,
                         "firstWord": "The",
-                        "lastWord": "mat.",
-                        "cleanedText": "actual text"
+                        "lastWord": "mat."
                     }
                 ]
             }`
