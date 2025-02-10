@@ -38,7 +38,7 @@ async function processDocuments(options) {
                 
                 // Step 2: Clean and chunk the text
                 console.log('Cleaning and chunking...');
-                const result = await processFile(text, 'cleanAndChunk', file, options.maxChunkLength);
+                const result = await processFile(text, 'cleanAndChunk', file, options.maxChunkLength, options.overview);
                 
                 // Step 3: Move original file to processed directory
                 const processedPath = path.join(PROCESSED_DIR, file);
@@ -68,8 +68,10 @@ const program = new Command();
 program
     .name('document-processor')
     .description('Process documents from inputFiles directory')
-    .option('-m, --max-chunk-length <length>', 'maximum length of chunks', '2000')
+    .option('-m, --maxChunkLength <number>', 'maximum length of each chunk', parseInt)
+    .option('-o, --overview <text>', 'overview text to include in the prompt')
     .action(async (options) => {
+        options.maxChunkLength = options.maxChunkLength || 2000;
         await processDocuments(options);
     });
 

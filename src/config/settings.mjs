@@ -99,7 +99,7 @@ export const OPENAI_PROMPTS = {
         content: `Analyze the given text chunk and provide detailed metadata in JSON format. Each piece of metadata needs to be standalone, not using ambiguous references like 'the text'. Include:
     - long_summary (2-3 paragraphs, in English)
     - short_summary (1-2 sentences, in English)
-    - quiz_questions (3-5 questions testing comprehension, in English)
+    - quiz_questions (3-5 questions testing comprehension, in English. Make sure these are standalone and do not ambiguously reference the text.)
     - followup_thinking_questions (2-3 deeper analytical questions, in English)
     - generated_title (in English)
     - tags_he (Hebrew, keywords)
@@ -110,7 +110,7 @@ export const OPENAI_PROMPTS = {
     - questions_explicit (directly stated in text, Original Hebrew)
     - questions_implied (suggested by the content, English)
     - reconciled_issues (how the text resolves contradictions, English)
-    - qa_pair (one detailed question and answer, English)
+    - qa_pair (detailed questions and answers, English. Not questions on the text, but questions the user may ask which we can answer based on the text.)
     - potential_typos (array of possible errors, Original Hebrew)
     - identified_abbreviations (array of abbreviations with expansions, Original Hebrew)
     - named_entities (array of people, places, texts mentioned, Original Hebrew)
