@@ -1,7 +1,7 @@
 export const OPENAI_SETTINGS = {
     model: "o3-mini",  // newest model as of May 13, 2024
     defaultMaxChunkLength: 500,
-    textRemovalPositionTolerance: 5,  // Maximum character difference allowed for text removal positions
+    textRemovalPositionTolerance: 25,  // Maximum character difference allowed for text removal positions
     preChunkSize: 1500  // Size for pre-chunking before LLM processing
 };
 

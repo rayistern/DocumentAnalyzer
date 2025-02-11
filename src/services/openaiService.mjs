@@ -12,6 +12,8 @@ const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY
 });
 
+const tolerance = OPENAI_SETTINGS.textRemovalPositionTolerance;
+
 export async function processFile(content, type, filepath, maxChunkLength = OPENAI_SETTINGS.defaultMaxChunkLength) {
     try {
         switch (type) {
@@ -241,19 +243,18 @@ function validateChunks(chunks, cleanedText) {
     return documentWarnings;
 }
 
-function findCompleteBoundary(text, position, lastWord, tolerance = 25) {
-    // Look for the last word within tolerance range
+function findCompleteBoundary(text, position, word) {
+    // Look for the word within tolerance range
     const start = Math.max(0, position - tolerance);
     const end = Math.min(text.length, position + tolerance);
     const searchText = text.substring(start, end);
     
-    // Find the last word in this range
-    const wordIndex = searchText.indexOf(lastWord);
+    const wordIndex = searchText.indexOf(word);
     if (wordIndex !== -1) {
-        return start + wordIndex + lastWord.length;
+        return start + wordIndex;
     }
     
-    return position; // Fallback to original position
+    return position;
 }
 
 async function cleanAndChunkDocument(text, maxChunkLength, filepath) {
@@ -399,7 +400,7 @@ async function cleanAndChunkDocument(text, maxChunkLength, filepath) {
                 console.log(`Cleaned text length: ${cleanedText.length}`);
 
                 let cumulativeOffset = 0;  // Track cumulative position differences
-                chunkResult.chunks = chunkResult.chunks.map(c => {
+                chunkResult.chunks = chunkResult.chunks.map((c, index) => {
                     // Debug output
                     console.log('\n=== Chunk processing ===');
                     console.log('LLM returned:');
@@ -409,52 +410,83 @@ async function cleanAndChunkDocument(text, maxChunkLength, filepath) {
                     console.log(`- Full text:\n${c.cleanedText}`);
                     
                     // Get text from LLM's positions in cleaned text, adjusted by cumulative offset
-                    const localStartIndex = c.startIndex - 1 + cumulativeOffset;
+                    const suggestedStartIndex = c.startIndex + cumulativeOffset;
                     const suggestedEndIndex = c.endIndex + cumulativeOffset;
-                    const adjustedEndIndex = findCompleteBoundary(cleanedText, suggestedEndIndex, c.lastWord);
+                    
+                    const adjustedStartIndex = findCompleteBoundary(cleanedText, suggestedStartIndex, c.firstWord);
+                    const adjustedEndIndex = findCompleteBoundary(cleanedText, suggestedEndIndex, c.lastWord) + c.lastWord.length;
                     
                     // Update cumulative offset for next chunk
-                    const newOffset = suggestedEndIndex - adjustedEndIndex;  // If we went further than LLM wanted, this will be negative
-                    cumulativeOffset -= newOffset;  // Subtract the offset to move in the right direction
-                    console.log(`Offset for this chunk: ${newOffset}, Cumulative offset: ${cumulativeOffset}`);
+                    const newOffset = suggestedEndIndex - adjustedEndIndex;
+                    cumulativeOffset -= newOffset;
+                    console.log(`Position adjustments:`);
+                    console.log(`- Original start: ${c.startIndex}, end: ${c.endIndex}`);
+                    console.log(`- Adjusted start: ${adjustedStartIndex + 1}, end: ${adjustedEndIndex}`);
+                    console.log(`- Offset this chunk: ${newOffset}, Cumulative: ${cumulativeOffset}`);
 
-                    const chunkText = cleanedText.substring(localStartIndex, adjustedEndIndex);
-                    
-                    console.log('\nOur calculation:');
-                    console.log(`- Text length: ${chunkText.length}`);
-                    console.log(`- Text from cleaned text:\n${chunkText}`);
+                    const chunkText = cleanedText.substring(adjustedStartIndex, adjustedEndIndex);
                     
                     // Find where the period actually is
-                    const periodIndex = cleanedText.indexOf('.', localStartIndex);
+                    const periodIndex = cleanedText.indexOf('.', adjustedStartIndex);
                     console.log('\nPosition analysis:');
                     console.log(`- LLM wants to end at: ${c.endIndex}`);
                     console.log(`- Next period is at: ${periodIndex}`);
-                    console.log(`- Text up to period:\n${cleanedText.substring(localStartIndex, periodIndex + 1)}`);
+                    console.log(`- Text up to period:\n${cleanedText.substring(adjustedStartIndex, periodIndex + 1)}`);
                     console.log(`- Text after period:\n${cleanedText.substring(periodIndex + 1, c.endIndex)}`);
+                    
+                    // Check if we found the word within our tolerance range
+                    const positionDifference = Math.abs(suggestedEndIndex - adjustedEndIndex);
+                    const withinTolerance = positionDifference <= tolerance;
                     
                     // Verify first/last words
                     const words = chunkText.trim().split(/\s+/);
                     const actualFirstWord = words[0];
                     const actualLastWord = words[words.length - 1];
                     
+                    // Check word matches with fuzzy matching
+                    const fuzzyMatch = (word1, word2) => {
+                        if (word1 === word2) return true;
+                        // Allow one character difference
+                        if (Math.abs(word1.length - word2.length) > 1) return false;
+                        let differences = 0;
+                        for (let i = 0; i < Math.max(word1.length, word2.length); i++) {
+                            if (word1[i] !== word2[i]) differences++;
+                            if (differences > 1) return false;
+                        }
+                        return true;
+                    };
+                    
+                    const firstWordMatch = fuzzyMatch(actualFirstWord, c.firstWord);
+                    const lastWordMatch = fuzzyMatch(actualLastWord, c.lastWord);
+                    
                     console.log('\nWord matching:');
-                    console.log(`- First word match: ${actualFirstWord === c.firstWord ? 'YES' : 'NO'}`);
+                    console.log(`- First word match: ${firstWordMatch ? 'YES' : 'NO'}`);
                     console.log(`  LLM: "${c.firstWord}"`);
                     console.log(`  Our: "${actualFirstWord}"`);
-                    console.log(`- Last word match: ${actualLastWord === c.lastWord ? 'YES' : 'NO'}`);
+                    console.log(`- Last word match: ${lastWordMatch ? 'YES' : 'NO'}`);
                     console.log(`  LLM: "${c.lastWord}"`);
                     console.log(`  Our: "${actualLastWord}"`);
+                    console.log(`- Within tolerance: ${withinTolerance ? 'YES' : 'NO'}`);
+                    console.log(`  LLM wanted: ${suggestedEndIndex}`);
+                    console.log(`  We found: ${adjustedEndIndex}`);
+                    console.log(`  Difference: ${positionDifference} chars`);
 
                     // Get both original and cleaned text for this chunk
-                    const originalChunkText = combinedText.substring(localStartIndex, adjustedEndIndex);
+                    const originalChunkText = combinedText.substring(adjustedStartIndex, adjustedEndIndex);
 
                     return {
-                        startIndex: localStartIndex + 1, // Keep 1-indexed for consistency with LLM
+                        startIndex: adjustedStartIndex + 1, // Keep 1-indexed for consistency with LLM
                         endIndex: adjustedEndIndex,
                         firstWord: actualFirstWord,
                         lastWord: actualLastWord,
                         cleanedText: chunkText,
-                        original_text: originalChunkText
+                        original_text: originalChunkText,
+                        first_word_match: firstWordMatch,
+                        last_word_match: lastWordMatch,
+                        within_tolerance: withinTolerance,
+                        position_difference: positionDifference,
+                        llm_suggested_end: suggestedEndIndex,
+                        actual_end: adjustedEndIndex
                     };
                 });
 
@@ -482,6 +514,12 @@ async function cleanAndChunkDocument(text, maxChunkLength, filepath) {
                         cleaned_text: c.cleanedText,
                         original_text: c.original_text,
                         warnings: Array.isArray(c.warnings) ? c.warnings.join('\n') : null,
+                        first_word_match: c.first_word_match,
+                        last_word_match: c.last_word_match,
+                        within_tolerance: c.within_tolerance,
+                        position_difference: c.position_difference,
+                        llm_suggested_end: c.llm_suggested_end,
+                        actual_end: c.actual_end,
                         created_at: new Date().toISOString()
                     })));
 
