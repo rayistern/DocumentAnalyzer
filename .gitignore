@@ -47,3 +47,5 @@ replit.nix
 inputFiles/
 processedFiles/
 tempTxt/
+temp_convert/
+converted/

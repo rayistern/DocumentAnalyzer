@@ -14,7 +14,7 @@ const openai = new OpenAI({
 
 const tolerance = OPENAI_SETTINGS.textRemovalPositionTolerance;
 
-export async function processFile(content, type, filepath, maxChunkLength = OPENAI_SETTINGS.defaultMaxChunkLength) {
+export async function processFile(content, type, filepath, maxChunkLength = OPENAI_SETTINGS.defaultMaxChunkLength, overview = '') {
     try {
         switch (type) {
             case 'sentiment':
@@ -22,7 +22,7 @@ export async function processFile(content, type, filepath, maxChunkLength = OPEN
             case 'chunk':
                 return await createChunks(content, maxChunkLength, filepath);
             case 'cleanAndChunk':
-                return await cleanAndChunkDocument(content, maxChunkLength, filepath);
+                return await cleanAndChunkDocument(content, maxChunkLength, filepath, overview);
             default:
                 return await summarizeContent(content);
         }
@@ -257,7 +257,7 @@ function findCompleteBoundary(text, position, word) {
     return position;
 }
 
-async function cleanAndChunkDocument(text, maxChunkLength, filepath) {
+async function cleanAndChunkDocument(text, maxChunkLength, filepath, overview) {
     try {
         console.log('Starting clean and chunk process...');
         

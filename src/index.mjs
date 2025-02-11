@@ -72,6 +72,7 @@ program
     .argument('<pattern>', 'glob pattern for files to process (e.g. "*.txt" or "docs/*.pdf")')
     .option('-t, --type <type>', 'analysis type (sentiment|summary|chunk)', 'summary')
     .option('-m, --max-chunk-length <length>', 'maximum length of chunks when using chunk type', '2000')
+    .option('-o, --overview <text>', 'overview text to include in the prompt')
     .action(async (pattern, options) => {
         try {
             const glob = await import('glob');
@@ -87,7 +88,7 @@ program
                 try {
                     console.log(`\nProcessing ${filepath}...`);
                     const content = await readTextFile(filepath);
-                    const result = await processFile(content, options.type, filepath, options.maxChunkLength);
+                    const result = await processFile(content, options.type, filepath, options.maxChunkLength, options.overview);
                     console.log(`Completed ${filepath}`);
                 } catch (error) {
                     console.error(`Error processing ${filepath}:`, error.message);
