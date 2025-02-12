@@ -6,33 +6,42 @@ const supabase = createClient(
     process.env.SUPABASE_ANON_KEY
 );
 
-export async function checkDocumentExists(filename) {
-    console.log('Checking document:', filename);
+async function debugCheckFilename(filename) {
+    // Check for any similar filenames
+    const { data, error } = await supabase
+        .from('document_sources')
+        .select('filename')
+        .ilike('filename', '%' + filename + '%');
     
-    // Try exact match first
-    let { data, error } = await supabase
+    console.log('Debug - Found these similar filenames in DB:', data);
+}
+
+export async function checkDocumentExists(filename) {
+    // Construct the full path with backslashes
+    const fullPath = `G:\\My Drive\\Igros\\${filename}`;
+    console.log('Checking document with full path:', fullPath);
+    
+    const { data, error } = await supabase
         .from('document_sources')
         .select('id, filename')
-        .eq('filename', filename);
+        .eq('filename', fullPath);
     
     if (error) {
         console.error('Error checking document:', error);
         return false;
     }
     
-    // If no exact match, try case-insensitive match
+    // Also check without path
     if (!data?.length) {
-        ({ data, error } = await supabase
+        const { data: simpleData, error: simpleError } = await supabase
             .from('document_sources')
             .select('id, filename')
-            .ilike('filename', filename));
+            .eq('filename', filename);
             
-        if (error) {
-            console.error('Error checking document:', error);
-            return false;
+        if (simpleData?.length) {
+            return true;
         }
     }
     
-    console.log('Database results:', data);
-    return data?.length > 0;
+    return data && data.length > 0;
 } 

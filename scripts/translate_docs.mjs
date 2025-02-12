@@ -12,20 +12,8 @@ const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY
 });
 
-async function translateText(text, prompt = "Translate this to English") {
-    console.log('\nAPI Request:', {
-        model: "o1-mini",
-        messages: [{ role: "user", content: `${prompt}: ${text}` }]
-    });
-
-    const response = await openai.chat.completions.create({
-        model: "o1-mini",
-        messages: [{ role: "user", content: `${prompt}: ${text}` }],
-    });
-
-    console.log('\nAPI Response:', JSON.stringify(response, null, 2));
-    return response.choices[0].message.content;
-}
+// Define constant for model
+const MODEL = "gpt-4o-mini";
 
 async function convertAndTranslateFile(filepath, prompt) {
     try {
@@ -79,24 +67,30 @@ async function convertAndTranslateFile(filepath, prompt) {
         // Clean up temp file
         await fs.unlink(tempOutputPath);
 
-        // Translate the text
+        // Translate the text and get keywords
         const response = await openai.chat.completions.create({
-            model: "gpt-4o-mini",
-            messages: [{ role: "user", content: `${prompt}: ${convertedText}` }],
+            model: MODEL,
+            messages: [{ 
+                role: "user", 
+                content: `${prompt}\n\nPlease provide: 1. Translation of the following text 2. A list of 5-10 tags/topics/keywords from the text, comma separated. Return as JSON with "translation" and "keywords" fields: ${convertedText}` 
+            }],
         });
 
         console.log('\nAPI Response:', JSON.stringify(response, null, 2));
         
-        // Save to supabase with API stats
+        const result = JSON.parse(response.choices[0].message.content);
+        
+        // Save to supabase with API stats and keywords
         await supabase.from('translations').insert({
             original_filename: filename,
             original_text: convertedText,
-            translated_text: response.choices[0].message.content,
+            translated_text: result.translation,
+            keywords: result.keywords,
             timestamp: new Date().toISOString(),
             prompt_tokens: response.usage.prompt_tokens,
             completion_tokens: response.usage.completion_tokens,
             total_tokens: response.usage.total_tokens,
-            model: response.model || "o1-mini",  // Fallback in case response.model is undefined
+            model: MODEL,
             prompt: prompt
         });
         
