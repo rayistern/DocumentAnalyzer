@@ -1,24 +1,17 @@
 {
-  "name": "workspace",
+  "name": "document-processor",
   "version": "1.0.0",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "type": "module",
   "dependencies": {
     "@supabase/supabase-js": "^2.48.1",
-    "@types/pg": "^8.11.11",
     "commander": "^13.1.0",
     "dotenv": "^16.4.7",
-    "drizzle-orm": "^0.39.2",
-    "glob": "^11.0.1",
     "mammoth": "^1.9.0",
     "openai": "^4.83.0",
-    "pg": "^8.13.1",
-    "postgres": "^3.4.5"
+    "glob": "^11.0.1"
+  },
+  "scripts": {
+    "start": "node src/processDocuments.mjs",
+    "batch": "node src/batch/index.mjs"
   }
 }

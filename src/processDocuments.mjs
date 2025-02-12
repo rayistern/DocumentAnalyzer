@@ -5,6 +5,7 @@ import { processFile } from './services/openaiService.mjs';
 import { Command } from 'commander';
 import fs from 'fs/promises';
 import path from 'path';
+import { checkDocumentExists } from './services/dbService.mjs';
 
 const INPUT_DIR = 'inputFiles';
 const PROCESSED_DIR = 'processedFiles';
@@ -28,7 +29,17 @@ async function processDocuments(options) {
         for (const file of files) {
             const inputPath = path.join(INPUT_DIR, file);
             try {
-                console.log(`\nProcessing ${file}...`);
+                // Get just the filename without the path
+                const filename = path.basename(file);
+                
+                // Check if file exists in document_sources
+                const exists = await checkDocumentExists(filename);
+                if (exists) {
+                    console.log(`Skipping ${filename} - already processed`);
+                    continue;
+                }
+
+                console.log(`\nProcessing ${filename}...`);
                 
                 // Step 1: Convert to text if needed
                 console.log('Converting to text...');

@@ -5,6 +5,10 @@ import dotenv from 'dotenv';
 import { processFile } from './services/openaiService.mjs';
 import { readTextFile } from './utils/fileReader.mjs';
 import { getAnalysisByType } from './services/supabaseService.mjs';
+import { glob } from 'glob';
+import path from 'path';
+import { convertToText } from './utils/documentConverter.mjs';
+import { checkDocumentExists } from './services/dbService.mjs';
 
 dotenv.config();
 
@@ -68,33 +72,51 @@ program
 
 program
     .command('batch')
-    .description('Process multiple text files through OpenAI API')
-    .argument('<pattern>', 'glob pattern for files to process (e.g. "*.txt" or "docs/*.pdf")')
-    .option('-t, --type <type>', 'analysis type (sentiment|summary|chunk)', 'summary')
-    .option('-m, --max-chunk-length <length>', 'maximum length of chunks when using chunk type', '2000')
-    .option('-o, --overview <text>', 'overview text to include in the prompt')
+    .description('Process multiple documents matching a glob pattern')
+    .argument('<pattern>', 'glob pattern for files')
+    .option('-t, --type <type>', 'processing type', 'cleanAndChunk')
+    .option('-m, --maxChunkLength <number>', 'maximum length of each chunk', '2000')
+    .option('-o, --overview <text>', 'overview text to include')
     .action(async (pattern, options) => {
         try {
-            const glob = await import('glob');
-            const files = await glob.glob(pattern);
-            
-            if (files.length === 0) {
-                console.log('No files found matching pattern:', pattern);
-                return;
-            }
+            const files = await glob(pattern);
+            console.log(`Found ${files.length} files matching pattern`);
 
-            console.log(`Found ${files.length} files to process`);
-            for (const filepath of files) {
+            for (const file of files) {
                 try {
-                    console.log(`\nProcessing ${filepath}...`);
-                    const content = await readTextFile(filepath);
-                    const result = await processFile(content, options.type, filepath, options.maxChunkLength, options.overview);
-                    console.log(`Completed ${filepath}`);
+                    // Get just the filename without the path
+                    const filename = path.basename(file);
+                    
+                    // Check if file exists in document_sources
+                    const exists = await checkDocumentExists(filename);
+                    if (exists) {
+                        console.log(`Skipping ${filename} - already processed`);
+                        continue;
+                    }
+
+                    console.log(`\nProcessing ${filename}...`);
+                    
+                    // Convert to text
+                    const text = await convertToText(file);
+                    
+                    // Process the text
+                    const result = await processFile(
+                        text, 
+                        options.type, 
+                        filename,
+                        parseInt(options.maxChunkLength),
+                        options.overview
+                    );
+
+                    console.log(`Successfully processed ${filename}`);
+                    console.log('Chunks:', result.chunks ? result.chunks.length : 0);
+                    if (result.warnings?.length > 0) {
+                        console.log('Warnings:', result.warnings);
+                    }
                 } catch (error) {
-                    console.error(`Error processing ${filepath}:`, error.message);
+                    console.error(`Error processing ${file}:`, error.message);
                 }
             }
-            console.log('\nBatch processing complete');
         } catch (error) {
             console.error('Batch processing error:', error.message);
             process.exit(1);
