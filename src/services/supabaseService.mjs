@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import dotenv from 'dotenv'
+import { parseJsonResponse } from '../utils/jsonUtils.mjs'
 
 dotenv.config()
 
@@ -9,14 +10,6 @@ const supabase = createClient(
 )
 
 export { supabase };
-
-function removeMarkdownFormatting(text) {
-  return text.replace(/```[\s\S]*?```/g, match => {
-      // Extract content between backticks, removing the first line (```json)
-      const content = match.split('\n').slice(1, -1).join('\n');
-      return content;
-  });
-}
 
 export async function saveAnalysis(content, type, metadata = {}) {
     try {
@@ -63,7 +56,7 @@ export async function saveAnalysis(content, type, metadata = {}) {
         }
 
         // For chunks, save with source reference
-        if (metadata.chunks) {
+        if (metadata.chunks && !metadata.skipChunkSave) {
             const chunksToInsert = metadata.chunks
                 .filter(chunk => chunk.cleanedText && chunk.cleanedText.trim().length > 0)  // Filter out empty chunks
                 .map(chunk => ({

@@ -1,8 +1,20 @@
 export const OPENAI_SETTINGS = {
-    model: "o1",  // newest model as of May 13, 2024
-    defaultMaxChunkLength: 500,
-    textRemovalPositionTolerance: 25,  // Maximum character difference allowed for text removal positions
-    preChunkSize: 1500  // Size for pre-chunking before LLM processing
+    model: "o3-mini",  // newest model as of May 13, 2024
+    defaultMaxChunkLength: 3000,
+    textRemovalPositionTolerance: 35,  // Maximum character difference allowed for text removal positions
+    preChunkSize: 10000,  // Size for pre-chunking before LLM processing
+    fallbackModels: ["o1-mini", "gpt-4o-mini", "o3-mini"],  // In order of preference
+    retryConfig: {
+        maxRetries: 3,
+        retryDelayMs: 1000
+    },
+    gapConfig: {
+        maxTolerance: 50
+    },
+    modelConfig: {
+        // Models that support JSON response format
+        jsonFormatSupported: ['gpt-4o', 'gpt-4o-mini']
+    }
 };
 
 export const OPENAI_PROMPTS = {
@@ -34,17 +46,24 @@ export const OPENAI_PROMPTS = {
                     ]
                 }`
         }),
+        fullMetadata: () => ({
+            role: "user",
+            content: `Provide metadata in the following JSON format (no preface):
+{
+    "longDescription": "1-2 paragraphs describing the main content and arguments",
+    "keywords": ["array", "of", "key", "topics", "and", "themes"],
+    "questionsAnswered": ["What questions does this text answer?", "What problems does it solve?"]
+}`
+        }),
         chunk: (maxChunkLength, isIncomplete = false) => ({
             role: "user",
-            content: `Divide the following text into chunks${isIncomplete ? ' (note: this text may be cut off at the end, please ignore any incomplete text)' : ''}, following these strict rules:
-                - The goal is logical, thematic chunking.
-                - Keep each chunk around ${maxChunkLength} characters
+            content: `Segment this text into self-contained sections based on topic shifts. Each chunk should fully capture a concept but remain under ${maxChunkLength} characters.
+            ${isIncomplete ? ' (note: this text may be cut off at the end, please ignore any incomplete text)' : ''}
                 - Record the exact first and last complete words of each chunk for validation
                 - Each subsequent chunk MUST start right after the previous chunk's ending punctuation
                 - There MUST NOT be any gaps or overlaps between chunks
                 - Include all punctuation in the chunks
                 - Remember that this is Hebrew text, so some characters operate differently than in English and may not indicate the end of a sentence
-                - For each chunk, include the complete text of that chunk in the cleanedText field
 
                 Return a valid JSON in the following exact format (no preface):
                 {
@@ -54,7 +73,6 @@ export const OPENAI_PROMPTS = {
                             "endIndex": 23,
                             "firstWord": "The",
                             "lastWord": "mat.",
-                            "cleanedText": "actual text of the chunk"
                         }
                     ]
                 }`
