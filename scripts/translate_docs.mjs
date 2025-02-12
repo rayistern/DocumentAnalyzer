@@ -29,6 +29,20 @@ async function translateText(text, prompt = "Translate this to English") {
 
 async function convertAndTranslateFile(filepath, prompt) {
     try {
+        const filename = path.basename(filepath);
+        
+        // Check if file already exists in translations
+        const { data: existingTranslation } = await supabase
+            .from('translations')
+            .select('id')
+            .eq('original_filename', filename)
+            .limit(1);
+            
+        if (existingTranslation?.length > 0) {
+            console.log(`Skipping ${filename} - already translated`);
+            return;
+        }
+
         // Create temp directory if it doesn't exist
         const tempDir = 'temp_convert';
         await fs.mkdir(tempDir, { recursive: true });
@@ -75,7 +89,7 @@ async function convertAndTranslateFile(filepath, prompt) {
         
         // Save to supabase with API stats
         await supabase.from('translations').insert({
-            original_filename: path.basename(filepath),
+            original_filename: filename,
             original_text: convertedText,
             translated_text: response.choices[0].message.content,
             timestamp: new Date().toISOString(),
@@ -86,9 +100,9 @@ async function convertAndTranslateFile(filepath, prompt) {
             prompt: prompt
         });
         
-        console.log(`Processed ${filepath}`);
+        console.log(`Processed ${filename}`);
     } catch (error) {
-        console.error(`Error processing ${filepath}:`, error);
+        console.error(`Error processing ${filename}:`, error);
     }
 }
 
@@ -100,7 +114,7 @@ async function processPattern(pattern, prompt) {
             await convertAndTranslateFile(filepath, prompt);
         }
     } catch (error) {
-        console.error(`Error processing files: ${error}`);
+        console.error(`Error processing files:`, error);
     }
 }
 
@@ -120,4 +134,4 @@ if (args[0] === "-b") {
     const filepath = args[0];
     const prompt = args[1] || "Translate this to English";
     await convertAndTranslateFile(filepath, prompt);
-} 
+}
