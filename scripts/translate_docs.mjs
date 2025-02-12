@@ -96,7 +96,7 @@ async function convertAndTranslateFile(filepath, prompt) {
         
         console.log(`Processed ${filename}`);
     } catch (error) {
-        console.error(`Error processing ${filename}:`, error);
+        console.error(`Error processing ${filepath}:`, error);
     }
 }
 
@@ -109,6 +109,7 @@ async function processPattern(pattern, prompt) {
         }
     } catch (error) {
         console.error(`Error processing files:`, error);
+        throw error; // Re-throw to show the full error
     }
 }
 
