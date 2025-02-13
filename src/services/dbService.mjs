@@ -59,5 +59,11 @@ export async function getLastProcessedDocument() {
         return null;
     }
     
-    return data?.[0] || null;
+    // Return the full data object with the filename
+    return data?.[0] ? {
+        ...data[0],
+        filename: data[0].filename.includes('G:\\My Drive\\Igros\\') ? 
+            data[0].filename : 
+            `G:\\My Drive\\Igros\\${data[0].filename}`
+    } : null;
 } 

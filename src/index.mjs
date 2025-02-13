@@ -103,10 +103,11 @@ program
             for (const file of files) {
                 try {
                     const filename = path.basename(file);
+                    const fullPath = `G:\\My Drive\\Igros\\${filename}`;
                     
                     // If we haven't reached the start file yet, skip
                     if (!shouldProcess) {
-                        if (filename === startFromFile) {
+                        if (filename === startFromFile || fullPath === startFromFile) {
                             shouldProcess = true;
                             continue; // Skip the start file since it's already processed
                         }
