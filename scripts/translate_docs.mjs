@@ -78,7 +78,10 @@ async function convertAndTranslateFile(filepath, prompt) {
 
         console.log('\nAPI Response:', JSON.stringify(response, null, 2));
         
-        const result = JSON.parse(response.choices[0].message.content);
+        let content = response.choices[0].message.content;
+        // Simple cleanup of markdown
+        content = content.replace(/```json\n/, '').replace(/```\n?$/, '');
+        const result = JSON.parse(content);
         
         // Save to supabase with API stats and keywords
         await supabase.from('translations').insert({
