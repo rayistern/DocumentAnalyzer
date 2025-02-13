@@ -1,19 +1,28 @@
 export const OPENAI_SETTINGS = {
-    model: "o3-mini",  // newest model as of May 13, 2024
+    model: "o3-mini",  // default model
     defaultMaxChunkLength: 3000,
     textRemovalPositionTolerance: 35,  // Maximum character difference allowed for text removal positions
-    preChunkSize: 10000,  // Size for pre-chunking before LLM processing
+    preChunkSize: 11000,  // Size for pre-chunking before LLM processing
     fallbackModels: ["o1-mini", "gpt-4o-mini", "o3-mini"],  // In order of preference
     retryConfig: {
         maxRetries: 3,
         retryDelayMs: 1000
     },
     gapConfig: {
-        maxTolerance: 50
+        maxTolerance: 1
     },
     modelConfig: {
         // Models that support JSON response format
-        jsonFormatSupported: ['gpt-4o', 'gpt-4o-mini']
+        jsonFormatSupported: ['gpt-4o', 'gpt-4o-mini'],
+        // Models to use for different operations
+        operations: {
+            clean: "o3-mini",
+            chunk: "o3-mini",
+            metadata: "gpt-4o-mini",
+            summarize: "gpt-4o-mini",
+            sentiment: "o3-mini",
+            fullMetadata: "gpt-4o-mini"
+        }
     }
 };
 
@@ -48,11 +57,11 @@ export const OPENAI_PROMPTS = {
         }),
         fullMetadata: () => ({
             role: "user",
-            content: `Provide metadata in the following JSON format (no preface):
+            content: `Provide metadata (in English) in the following JSON format (with no preface):
 {
     "longDescription": "1-2 paragraphs describing the main content and arguments",
-    "keywords": ["array", "of", "key", "topics", "and", "themes"],
-    "questionsAnswered": ["What questions does this text answer?", "What problems does it solve?"]
+    "keywords": ["array", "of", "key", "topics", "and", "themes"], -- specific keywords on this specific text, not generic like "chabad" or "jewish"
+    "questionsAnswered": ["Question?", "Question?"] -- implied questions that the text answers, not questions about the text
 }`
         }),
         chunk: (maxChunkLength, isIncomplete = false) => ({
@@ -86,37 +95,12 @@ export const OPENAI_PROMPTS = {
         role: "user",
         content: "Analyze the sentiment of the text and provide a JSON response with 'sentiment' (positive/negative/neutral), 'score' (1-5), and 'confidence' (0-1) fields."
     },
-    chunk: {
-        role: "user",
-        content: (maxChunkLength) => `Divide the following text into chunks, following these strict rules:
-            1. Each chunk MUST end with a complete sentence (ending with ., !, or ?)
-            2. Never split in the middle of a sentence
-            3. Keep each chunk under ${maxChunkLength} characters
-            4. Start each chunk at the beginning of a sentence
-            5. Record the exact first and last complete words of each chunk
-            6. The first chunk MUST start at index 1
-            7. Each subsequent chunk MUST start right after the previous chunk's ending punctuation
-            8. There MUST NOT be any gaps or overlaps between chunks
-            9. Include all punctuation in the chunks
-
-            Return a valid JSON in the following exact format (no preface):
-            {
-                "chunks": [
-                    {
-                        "startIndex": 1,
-                        "endIndex": 23,
-                        "firstWord": "The",
-                        "lastWord": "mat."
-                    }
-                ]
-            }`
-    },
     metadata: () => ({
         role: "user",
         content: `Analyze the given text chunk and provide detailed metadata in JSON format. Each piece of metadata needs to be standalone, not using ambiguous references like 'the text'. Include:
-    - long_summary (2-3 paragraphs, in English)
+    - long_summary (2-3 paragraphs, in English. The audience is familiar with the domain.)
     - short_summary (1-2 sentences, in English)
-    - quiz_questions (3-5 questions testing comprehension, in English. Make sure these are standalone and do not ambiguously reference the text.)
+    - quiz_questions (3-5 questions in English. Make sure these can be used standalone and do not ambiguously reference the text.)
     - followup_thinking_questions (2-3 deeper analytical questions, in English)
     - generated_title (in English)
     - tags_he (Hebrew, keywords)

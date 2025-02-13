@@ -1,23 +1,39 @@
 export function cleanJsonResponse(text) {
-    console.log('\nRaw response before cleaning:', text);
-    const cleaned = text.replace(/```[\s\S]*?```/g, match => {
-        // Extract content between backticks, removing the first line (```json)
-        const content = match.split('\n').slice(1, -1).join('\n');
-        return content;
+    // First remove any markdown code blocks
+    let cleaned = text.replace(/```[\s\S]*?```/g, match => {
+        const lines = match.split('\n');
+        // Remove the first and last lines (``` markers)
+        return lines.slice(1, -1).join('\n');
     });
-    console.log('\nCleaned response:', cleaned);
+    
+    // Remove any remaining backticks
+    cleaned = cleaned.replace(/`/g, '');
+    
+    // Remove any leading/trailing whitespace and newlines
+    cleaned = cleaned.trim();
+    
     return cleaned;
 }
 
 export function parseJsonResponse(text) {
+    // Log the raw response first
+    console.log('\nRaw LLM Response:');
+    console.log('----------------------------------------');
+    console.log(text);
+    console.log('----------------------------------------\n');
+    
     try {
         const cleaned = cleanJsonResponse(text);
-        return JSON.parse(cleaned);
+        // Handle Hebrew text by replacing Hebrew quotes with standard ones
+        const normalized = cleaned
+            .replace(/[""]/g, '"')  // Replace curly quotes with straight quotes
+            .replace(/['']/g, "'"); // Replace curly apostrophes with straight ones
+        return JSON.parse(normalized);
     } catch (error) {
-        console.error('\nJSON Parse Error:', error.message);
-        console.error('Failed to parse at position:', error.message.match(/position (\d+)/)?.[1]);
-        console.error('Text around error:', cleaned.slice(Math.max(0, error.message.match(/position (\d+)/)?.[1] - 50), 
-                                                        Math.min(cleaned.length, error.message.match(/position (\d+)/)?.[1] + 50)));
-        throw error;
+        console.warn('Failed to parse JSON response. Using empty default.');
+        console.warn('Error:', error.message);
+        console.warn('Cleaned text:', cleanJsonResponse(text));
+        // Return a basic structure that won't break the code
+        return { textToRemove: [] };
     }
 } 

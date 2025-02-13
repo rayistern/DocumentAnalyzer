@@ -21,13 +21,21 @@ function supportsJsonFormat(model) {
 }
 
 function createApiOptions(model, messages) {
-    return {
+    const options = {
         model,
-        messages,
-        ...(supportsJsonFormat(model) && {
-            response_format: { type: "json_object" }
-        })
+        messages
     };
+    
+    // Only add response_format for models that explicitly support it
+    if (model.startsWith('gpt-4o')) {
+        options.response_format = { type: "json_object" };
+    }
+    
+    return options;
+}
+
+function getModelForOperation(operation) {
+    return OPENAI_SETTINGS.modelConfig.operations[operation] || OPENAI_SETTINGS.model;
 }
 
 export async function processFile(content, type, filepath, maxChunkLength = OPENAI_SETTINGS.defaultMaxChunkLength, overview = '') {
@@ -188,7 +196,7 @@ async function createChunks(text, maxChunkLength, filepath) {
             });
         }
 
-        result.warnings = validateChunks(result.chunks, text);
+        result.warnings = validateChunks(result.chunks, cleanResponse);
         
         // Store in Supabase
         await saveAnalysis(text, 'chunk', { ...result, filepath });
@@ -202,7 +210,7 @@ async function createChunks(text, maxChunkLength, filepath) {
 async function summarizeContent(text) {
     try {
         const response = await openai.chat.completions.create(
-            createApiOptions(OPENAI_SETTINGS.model, [
+            createApiOptions(getModelForOperation('summarize'), [
                 OPENAI_PROMPTS.summarize,
                 {
                     role: "user",
@@ -226,7 +234,7 @@ async function summarizeContent(text) {
 async function analyzeSentiment(text) {
     try {
         const response = await openai.chat.completions.create(
-            createApiOptions(OPENAI_SETTINGS.model, [
+            createApiOptions(getModelForOperation('sentiment'), [
                 OPENAI_PROMPTS.sentiment,
                 {
                     role: "user",
@@ -255,10 +263,13 @@ function validateChunks(chunks, cleanedText) {
         console.log(`\nValidating chunk ${index + 1}:`, chunk);
         const chunkWarnings = [];
         
-        if (chunk.startIndex !== (index === 0 ? 1 : chunks[index - 1].endIndex + 1)) {
-            const gapText = cleanedText.slice(index === 0 ? 0 : chunks[index - 1].endIndex, chunk.startIndex - 1);
-            const gapValidation = validateGap(gapText);
-            chunkWarnings.push(gapValidation.message);
+        if (index > 0) {
+            const gap = chunk.startIndex - chunks[index - 1].endIndex - 1;
+            if (gap > 0) {
+                const gapText = cleanedText.slice(chunks[index - 1].endIndex, chunk.startIndex - 1);
+                const gapValidation = validateGap(gapText);
+                chunkWarnings.push(gapValidation.message);
+            }
         }
 
         const chunkText = cleanedText.slice(chunk.startIndex - 1, chunk.endIndex);
@@ -325,6 +336,9 @@ async function cleanAndChunkDocument(text, maxChunkLength, filepath, overview) {
         let remainderText = '';
         let finalCleanedText = '';  // Store the complete cleaned text
 
+        // Constants for chunk boundary handling
+        const CHUNK_END_OVERLAP = 100; // How much extra text to include at end of chunk for context overlap
+
         // Process each pre-chunk
         for (let i = 0; i < preChunks.length; i++) {
             console.log(`\nProcessing pre-chunk ${i + 1}/${preChunks.length}...`);
@@ -358,7 +372,7 @@ async function cleanAndChunkDocument(text, maxChunkLength, filepath, overview) {
             // Step 1: Clean the text chunk using LLM
             console.log('Cleaning text chunk...');
             const cleanResponse = await openai.chat.completions.create(
-                createApiOptions(OPENAI_SETTINGS.model, [
+                createApiOptions(getModelForOperation('clean'), [
                     OPENAI_PROMPTS.cleanAndChunk.clean('', !chunk.isComplete),
                     {
                         role: "user",
@@ -369,7 +383,28 @@ async function cleanAndChunkDocument(text, maxChunkLength, filepath, overview) {
 
             console.log('Clean response received');
             await logLLMResponse(null, cleanResponse.choices[0].message.content, OPENAI_SETTINGS.model);
-            const cleanResult = parseJsonResponse(cleanResponse.choices[0].message.content);
+            let cleanResult;
+            try {
+                cleanResult = parseJsonResponse(cleanResponse.choices[0].message.content);
+            } catch (parseError) {
+                console.warn('Failed to parse LLM response as JSON, storing raw response:', parseError.message);
+                // Store the raw response and continue
+                const { error: rawError } = await supabase
+                    .from('documents')
+                    .update({ 
+                        raw_llm_response: cleanResponse.choices[0].message.content,
+                        status: 'parse_error',
+                        error_message: parseError.message,
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', document.id);
+                
+                if (rawError) {
+                    console.error('Error storing raw response:', rawError);
+                }
+                // Return empty result to continue processing
+                cleanResult = { textToRemove: [] };
+            }
             console.log('Parsed clean result');
             
             // Adjust positions of textToRemove based on chunk start position
@@ -390,10 +425,13 @@ async function cleanAndChunkDocument(text, maxChunkLength, filepath, overview) {
             console.log(`Cleaned text length: ${cleanedText.length}`);
             console.log('First 100 chars of cleaned text:', cleanedText.substring(0, 100));
 
+            // Update document with current cleaned text
+            await saveCleanedDocument(document.id, finalCleanedText, text, OPENAI_SETTINGS.model);
+
             // Get metadata for the cleaned text
             console.log('\nGetting metadata for cleaned text...');
             const metadataResponse = await openai.chat.completions.create(
-                createApiOptions(OPENAI_SETTINGS.model, [
+                createApiOptions(getModelForOperation('metadata'), [
                     OPENAI_PROMPTS.cleanAndChunk.fullMetadata(),
                     {
                         role: "user",
@@ -434,30 +472,42 @@ async function cleanAndChunkDocument(text, maxChunkLength, filepath, overview) {
                     content: cleanedText
                 }
             ];
-
-            // Log the full API call for debugging
-            console.log('\nFull API call:');
-            console.log('----------------------------------------');
-            console.log(JSON.stringify({
-                model: OPENAI_SETTINGS.model,
-                messages,
-                response_format: { type: "json_object" }
-            }, null, 2));
-            console.log('----------------------------------------\n');
             
             // Get semantic chunks from LLM
             const chunkResponse = await openai.chat.completions.create(
-                createApiOptions(OPENAI_SETTINGS.model, messages)
+                createApiOptions(getModelForOperation('chunk'), messages)
             );
 
             // Log and parse LLM's chunking response
             console.log('\nLLM Response Analysis:');
             console.log('----------------------------------------');
-            const parsedResponse = parseJsonResponse(removeMarkdownFormatting(chunkResponse.choices[0].message.content));
+            let parsedResponse;
+            try {
+                parsedResponse = parseJsonResponse(removeMarkdownFormatting(chunkResponse.choices[0].message.content));
+            } catch (parseError) {
+                console.warn('Failed to parse chunk response as JSON:', parseError.message);
+                // Store the raw response and continue
+                const { error: rawError } = await supabase
+                    .from('documents')
+                    .update({ 
+                        raw_chunk_response: chunkResponse.choices[0].message.content,
+                        status: 'chunk_parse_error',
+                        error_message: parseError.message,
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', document.id);
+                
+                if (rawError) {
+                    console.error('Error storing raw chunk response:', rawError);
+                }
+                // Return empty result to continue processing
+                parsedResponse = { chunks: [] };
+            }
+
             if (parsedResponse.chunks) {
                 console.log(`Number of chunks returned: ${parsedResponse.chunks.length}`);
-                parsedResponse.chunks.forEach((c, i) => {
-                    console.log(`\nChunk ${i + 1}:`);
+                parsedResponse.chunks.forEach((c, index) => {
+                    console.log(`\nChunk ${index + 1}:`);
                     console.log(`Start: ${c.startIndex}, End: ${c.endIndex}`);
                     console.log(`Text: ${c.cleanedText}`);
                 });
@@ -478,37 +528,126 @@ async function cleanAndChunkDocument(text, maxChunkLength, filepath, overview) {
 
                 let cumulativeOffset = 0;  // Track character position differences between what LLM sees vs actual text
                 chunkResult.chunks = chunkResult.chunks.map((c, index) => {
+                    // Check if we need to force start after previous chunk
+                    let startIndex = c.startIndex;
+                    let endIndex = c.endIndex;
+                    
+                    if (index > 0) {
+                        const gap = startIndex - (chunkResult.chunks[index - 1].endIndex + 1);
+                        if (gap > OPENAI_SETTINGS.gapConfig.maxTolerance) {
+                            startIndex = chunkResult.chunks[index - 1].endIndex + 1;
+                            console.log(`Gap of ${gap} exceeds tolerance. Forcing chunk to start at ${startIndex}`);
+                        }
+                    }
+                    
                     // Debug output
                     console.log('\n=== Chunk processing ===');
                     console.log('LLM returned:');
-                    console.log(`- Positions: ${c.startIndex}-${c.endIndex}`);
+                    console.log(`- Original positions: ${c.startIndex}-${c.endIndex}`);
+                    console.log(`- Adjusted start: ${startIndex}, end: ${endIndex}`);
                     console.log(`- First word: "${c.firstWord}"`);
                     console.log(`- Last word: "${c.lastWord}"`);
-                    console.log(`- Full text:\n${c.cleanedText}`);
                     
                     // The LLM's character counting can differ from our text due to:
                     // 1. Escaped characters being counted differently
                     // 2. Unicode/special characters being interpreted differently
                     // 3. Whitespace normalization
                     // So we need to adjust positions using a cumulative offset
-                    const suggestedStartIndex = c.startIndex + cumulativeOffset;
-                    const suggestedEndIndex = c.endIndex + cumulativeOffset;
+                    const suggestedStartIndex = startIndex + cumulativeOffset;
+                    const suggestedEndIndex = endIndex + cumulativeOffset;
                     
                     // Find the actual positions of first/last words within a tolerance range
-                    // This is needed because the LLM's word boundaries might not exactly match ours
-                    const adjustedStartIndex = findCompleteBoundary(cleanedText, suggestedStartIndex, c.firstWord);
-                    const adjustedEndIndex = findCompleteBoundary(cleanedText, suggestedEndIndex, c.lastWord) + c.lastWord.length;
+                    // This is critical for ensuring our chunks start/end exactly where the LLM intended
+                    // Chunking strategy:
+                    // 1. For chunk starts: Try to find LLM's word, fall back to previous chunk end (or doc start)
+                    // 2. For chunk ends: Try to find LLM's word, if not found add overlap to avoid cutting mid-sentence
+                    const findWordPosition = (text, targetWord, nearPosition, isStart, previousChunkEnd = 0) => {
+                        // For start positions, just search within tolerance
+                        // For end positions, only add overlap if we can't find the word
+                        const searchStart = Math.max(0, nearPosition - tolerance);
+                        const searchEnd = Math.min(text.length, nearPosition + tolerance);
+                        const searchArea = text.substring(searchStart, searchEnd);
+                        
+                        // First try exact match
+                        const exactIndex = searchArea.indexOf(targetWord);
+                        if (exactIndex !== -1) {
+                            const foundPosition = searchStart + exactIndex;
+                            console.log(`Found exact match "${targetWord}" at position ${foundPosition}`);
+                            return foundPosition;
+                        }
+
+                        // If exact match fails, try fuzzy matching since LLM might truncate words
+                        const words = searchArea.split(/\s+/);
+                        let bestMatch = null;
+                        let bestMatchIndex = -1;
+                        let bestMatchDifference = Infinity;
+
+                        for (let i = 0; i < words.length; i++) {
+                            const word = words[i];
+                            // Allow one character difference for truncation/normalization
+                            if (Math.abs(word.length - targetWord.length) <= 1) {
+                                let differences = 0;
+                                const minLength = Math.min(word.length, targetWord.length);
+                                for (let j = 0; j < minLength; j++) {
+                                    if (word[j] !== targetWord[j]) differences++;
+                                    if (differences > 1) break;
+                                }
+                                
+                                // Track the best fuzzy match we've found
+                                if (differences <= 1 && differences < bestMatchDifference) {
+                                    bestMatch = word;
+                                    bestMatchDifference = differences;
+                                    // Find this word's position in the search area
+                                    const wordPos = searchArea.indexOf(word);
+                                    if (wordPos !== -1) {
+                                        bestMatchIndex = searchStart + wordPos;
+                                    }
+                                }
+                            }
+                        }
+
+                        if (bestMatchIndex !== -1) {
+                            console.log(`Found fuzzy match "${bestMatch}" for target "${targetWord}" at position ${bestMatchIndex}`);
+                            return bestMatchIndex;
+                        }
+
+                        // If no match found, handle differently for start vs end positions
+                        console.error(`Could not find word "${targetWord}" or similar word near position ${nearPosition}`);
+                        console.error(`Search area (${searchArea.length} chars): "${searchArea}"`);
+                        
+                        if (isStart) {
+                            // For chunk starts, fall back to end of previous chunk (or start of doc)
+                            console.log(`Falling back to previous chunk end: ${previousChunkEnd}`);
+                            return previousChunkEnd;
+                        } else {
+                            // For chunk ends, if we can't find the word, add overlap to avoid cutting mid-sentence
+                            const overlapEnd = Math.min(text.length, nearPosition + CHUNK_END_OVERLAP);
+                            console.log(`No word match found - using overlapped end position: ${overlapEnd}`);
+                            return overlapEnd;
+                        }
+                    };
+
+                    // Find where the LLM's suggested words actually appear in the text
+                    // For the start position, we can use the previous chunk's end as fallback
+                    const previousChunkEnd = index > 0 ? chunkResult.chunks[index - 1].endIndex : 0;
+                    const adjustedStartIndex = findWordPosition(cleanedText, c.firstWord, suggestedStartIndex, true, previousChunkEnd);
                     
-                    // Update cumulative offset for next chunk
-                    // If this chunk was off by N characters, the next chunk's positions 
-                    // will likely be off by the same amount
-                    const newOffset = suggestedEndIndex - adjustedEndIndex;
+                    // For the end position, we'll allow overlap beyond the LLM's suggestion
+                    const adjustedEndIndex = findWordPosition(cleanedText, c.lastWord, suggestedEndIndex, false);
+                    
+                    // When calculating offsets, we need to ignore the arbitrary overlap we added
+                    // This ensures the next chunk's position calculations aren't thrown off
+                    const effectiveEndIndex = Math.min(adjustedEndIndex, suggestedEndIndex + tolerance);
+                    const newOffset = suggestedEndIndex - effectiveEndIndex;
                     cumulativeOffset -= newOffset;
+                    
                     console.log(`Position adjustments:`);
                     console.log(`- Original start: ${c.startIndex}, end: ${c.endIndex}`);
                     console.log(`- Adjusted start: ${adjustedStartIndex + 1}, end: ${adjustedEndIndex}`);
+                    console.log(`- Effective end (without overlap): ${effectiveEndIndex}`);
                     console.log(`- Offset this chunk: ${newOffset}, Cumulative: ${cumulativeOffset}`);
 
+                    // Extract the text between our found positions (including overlap)
                     const extractedText = cleanedText.substring(adjustedStartIndex, adjustedEndIndex);
                     
                     // Find where the period actually is for validation
@@ -520,23 +659,20 @@ async function cleanAndChunkDocument(text, maxChunkLength, filepath, overview) {
                     console.log(`- Text after period:\n${cleanedText.substring(periodIndex + 1, c.endIndex)}`);
                     
                     // Check if our position adjustments stayed within tolerance
-                    const positionDifference = Math.abs(suggestedEndIndex - adjustedEndIndex);
+                    const positionDifference = Math.abs(suggestedEndIndex - effectiveEndIndex);
                     const withinTolerance = positionDifference <= tolerance;
                     
-                    // Verify first/last words with fuzzy matching since LLM might:
-                    // 1. Normalize words (e.g., remove punctuation)
-                    // 2. Standardize quotes/apostrophes
-                    // 3. Handle compound words differently
-                    const words = extractedText.trim().split(/\s+/);
-                    const actualFirstWord = words[0];
-                    const actualLastWord = words[words.length - 1];
+                    // Get the actual words we found at our chosen positions for validation
+                    const actualFirstWord = cleanedText.substring(adjustedStartIndex).split(/\s+/)[0];
+                    const actualLastWord = cleanedText.substring(0, effectiveEndIndex).split(/\s+/).pop();
                     
+                    // Check if we found the LLM's suggested words (allowing for truncation)
                     const fuzzyMatch = (word1, word2) => {
                         if (word1 === word2) return true;
-                        // Allow one character difference for minor normalization issues
                         if (Math.abs(word1.length - word2.length) > 1) return false;
                         let differences = 0;
-                        for (let i = 0; i < Math.max(word1.length, word2.length); i++) {
+                        const minLength = Math.min(word1.length, word2.length);
+                        for (let i = 0; i < minLength; i++) {
                             if (word1[i] !== word2[i]) differences++;
                             if (differences > 1) return false;
                         }
@@ -555,14 +691,14 @@ async function cleanAndChunkDocument(text, maxChunkLength, filepath, overview) {
                     console.log(`  Our: "${actualLastWord}"`);
                     console.log(`- Within tolerance: ${withinTolerance ? 'YES' : 'NO'}`);
                     console.log(`  LLM wanted: ${suggestedEndIndex}`);
-                    console.log(`  We found: ${adjustedEndIndex}`);
+                    console.log(`  We found: ${effectiveEndIndex}`);
                     console.log(`  Difference: ${positionDifference} chars`);
                     
                     return {
                         startIndex: adjustedStartIndex + 1, // Keep 1-indexed for consistency with LLM
                         endIndex: adjustedEndIndex,
-                        firstWord: actualFirstWord,
-                        lastWord: actualLastWord,
+                        firstWord: cleanedText.substring(adjustedStartIndex, adjustedStartIndex + c.firstWord.length),
+                        lastWord: cleanedText.substring(adjustedEndIndex - c.lastWord.length, adjustedEndIndex),
                         cleanedText: extractedText,
                         original_text: chunk.text, // Store the original chunk text
                         first_word_match: firstWordMatch,
@@ -590,7 +726,7 @@ async function cleanAndChunkDocument(text, maxChunkLength, filepath, overview) {
                 // This ensures we don't lose work if processing fails later
                 const { error: chunksError } = await supabase
                     .from('chunks')
-                    .insert(chunkResult.chunks.map(c => ({
+                    .insert(cleanedChunks.map(c => ({
                         document_id: document.id,
                         document_source_id: document.document_source_id,
                         start_index: c.startIndex,
@@ -612,7 +748,7 @@ async function cleanAndChunkDocument(text, maxChunkLength, filepath, overview) {
                 if (chunksError) {
                     console.error('Error saving chunks:', chunksError);
                 } else {
-                    console.log(`Saved ${chunkResult.chunks.length} chunks to database`);
+                    console.log(`Saved ${cleanedChunks.length} chunks to database`);
                 }
             } else {
                 // If LLM didn't return chunks, treat entire cleaned text as remainder
@@ -633,7 +769,7 @@ async function cleanAndChunkDocument(text, maxChunkLength, filepath, overview) {
             });
         }
 
-        const warnings = validateChunks(cleanedChunks, text);
+        const warnings = validateChunks(cleanedChunks, finalCleanedText);
         console.log('Validation warnings:', warnings);
 
         const result = {
@@ -683,9 +819,6 @@ async function cleanAndChunkDocument(text, maxChunkLength, filepath, overview) {
             }
         }
         
-        // Update document with final cleaned text
-        await saveCleanedDocument(document.id, finalCleanedText, text, OPENAI_SETTINGS.model);
-        
         return result;
     } catch (error) {
         console.error('Clean and chunk error:', error);
@@ -696,7 +829,7 @@ async function cleanAndChunkDocument(text, maxChunkLength, filepath, overview) {
 async function generateMetadata(chunk) {
     return retryWithFallback(async (model) => {
         const response = await openai.chat.completions.create(
-            createApiOptions(model, [
+            createApiOptions(getModelForOperation('metadata'), [
                 OPENAI_PROMPTS.metadata(),
                 { role: "user", content: chunk.cleanedText }
             ])

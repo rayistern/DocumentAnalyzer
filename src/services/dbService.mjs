@@ -44,4 +44,20 @@ export async function checkDocumentExists(filename) {
     }
     
     return data && data.length > 0;
+}
+
+export async function getLastProcessedDocument() {
+    const { data, error } = await supabase
+        .from('document_sources')
+        .select('id, filename')
+        .eq('status', 'processed')
+        .order('created_at', { ascending: false })
+        .limit(1);
+    
+    if (error) {
+        console.error('Error getting last processed document:', error);
+        return null;
+    }
+    
+    return data?.[0] || null;
 } 

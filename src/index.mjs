@@ -8,7 +8,7 @@ import { getAnalysisByType } from './services/supabaseService.mjs';
 import { glob } from 'glob';
 import path from 'path';
 import { convertToText } from './utils/documentConverter.mjs';
-import { checkDocumentExists } from './services/dbService.mjs';
+import { checkDocumentExists, getLastProcessedDocument } from './services/dbService.mjs';
 
 dotenv.config();
 
@@ -77,15 +77,42 @@ program
     .option('-t, --type <type>', 'processing type', 'cleanAndChunk')
     .option('-m, --maxChunkLength <number>', 'maximum length of each chunk', '2000')
     .option('-o, --overview <text>', 'overview text to include')
+    .option('-s, --start-from <filename>', 'start processing from this file')
+    .option('-c, --continue', 'continue from last processed document')
     .action(async (pattern, options) => {
         try {
             const files = await glob(pattern);
             console.log(`Found ${files.length} files matching pattern`);
 
+            // If continuing from last processed, get the last document
+            let startFromFile = null;
+            if (options.continue) {
+                const lastDoc = await getLastProcessedDocument();
+                if (lastDoc) {
+                    startFromFile = path.basename(lastDoc.filename);
+                    console.log(`Continuing from last processed document: ${startFromFile}`);
+                }
+            } else if (options.startFrom) {
+                startFromFile = options.startFrom;
+                console.log(`Starting from specified document: ${startFromFile}`);
+            }
+
+            // Skip files until we reach the start point
+            let shouldProcess = !startFromFile;
+            
             for (const file of files) {
                 try {
-                    // Get just the filename without the path
                     const filename = path.basename(file);
+                    
+                    // If we haven't reached the start file yet, skip
+                    if (!shouldProcess) {
+                        if (filename === startFromFile) {
+                            shouldProcess = true;
+                            continue; // Skip the start file since it's already processed
+                        }
+                        console.log(`Skipping ${filename} - before start point`);
+                        continue;
+                    }
                     
                     // Check if file exists in document_sources
                     const exists = await checkDocumentExists(filename);
