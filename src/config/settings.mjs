@@ -60,7 +60,7 @@ export const OPENAI_PROMPTS = {
             content: `Provide metadata (in English) in the following JSON format (with no preface):
 {
     "longDescription": "1-2 paragraphs describing the main content and arguments",
-    "keywords": ["array", "of", "key", "topics", "and", "themes"], -- specific keywords on this specific text, not generic like "chabad" or "jewish"
+    "keywords": ["array", "of", "key", "topics", "and", "themes"], -- specific keywords on this specific piece of text or letter, not generic like "chabad" or "jewish"
     "questionsAnswered": ["Question?", "Question?"] -- implied questions that the text answers, not questions about the text
 }`
         }),
