@@ -79,6 +79,7 @@ program
     .option('-o, --overview <text>', 'overview text to include')
     .option('-s, --start-from <filename>', 'start processing from this file')
     .option('-c, --continue', 'continue from last processed document')
+    .option('-r, --reprocess-incomplete', 'reprocess documents that are in processing status')
     .action(async (pattern, options) => {
         try {
             const files = await glob(pattern);
@@ -103,20 +104,19 @@ program
             for (const file of files) {
                 try {
                     const filename = path.basename(file);
-                    const fullPath = `G:\\My Drive\\Igros\\${filename}`;
                     
                     // If we haven't reached the start file yet, skip
                     if (!shouldProcess) {
-                        if (filename === startFromFile || fullPath === startFromFile) {
+                        if (filename === startFromFile) {
                             shouldProcess = true;
-                            continue; // Skip the start file since it's already processed
+                            console.log(`Found start point: ${filename}`);
                         }
                         console.log(`Skipping ${filename} - before start point`);
                         continue;
                     }
                     
                     // Check if file exists in document_sources
-                    const exists = await checkDocumentExists(filename);
+                    const exists = await checkDocumentExists(filename, options.reprocessIncomplete);
                     if (exists) {
                         console.log(`Skipping ${filename} - already processed`);
                         continue;

@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import 'dotenv/config';
+import path from 'path';
 
 const supabase = createClient(
     process.env.SUPABASE_URL,
@@ -16,14 +17,14 @@ async function debugCheckFilename(filename) {
     console.log('Debug - Found these similar filenames in DB:', data);
 }
 
-export async function checkDocumentExists(filename) {
+export async function checkDocumentExists(filename, reprocessIncomplete = false) {
     // Construct the full path with backslashes
     const fullPath = `G:\\My Drive\\Igros\\${filename}`;
     console.log('Checking document with full path:', fullPath);
     
     const { data, error } = await supabase
         .from('document_sources')
-        .select('id, filename')
+        .select('id, filename, status')
         .eq('filename', fullPath);
     
     if (error) {
@@ -35,12 +36,23 @@ export async function checkDocumentExists(filename) {
     if (!data?.length) {
         const { data: simpleData, error: simpleError } = await supabase
             .from('document_sources')
-            .select('id, filename')
+            .select('id, filename, status')
             .eq('filename', filename);
             
         if (simpleData?.length) {
+            // If reprocessIncomplete is true and status is 'processing', allow reprocessing
+            if (reprocessIncomplete && simpleData[0].status === 'processing') {
+                console.log(`Found document in 'processing' status - will reprocess`);
+                return false;
+            }
             return true;
         }
+    }
+    
+    // If reprocessIncomplete is true and status is 'processing', allow reprocessing
+    if (data?.length && reprocessIncomplete && data[0].status === 'processing') {
+        console.log(`Found document in 'processing' status - will reprocess`);
+        return false;
     }
     
     return data && data.length > 0;
@@ -59,11 +71,9 @@ export async function getLastProcessedDocument() {
         return null;
     }
     
-    // Return the full data object with the filename
+    // Return just the filename without path
     return data?.[0] ? {
         ...data[0],
-        filename: data[0].filename.includes('G:\\My Drive\\Igros\\') ? 
-            data[0].filename : 
-            `G:\\My Drive\\Igros\\${data[0].filename}`
+        filename: path.basename(data[0].filename)
     } : null;
 } 
