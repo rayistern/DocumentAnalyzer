@@ -61,7 +61,7 @@ export const OPENAI_PROMPTS = {
 {
     "longDescription": "1-2 paragraphs describing the main content and arguments",
     "keywords": ["array", "of", "key", "topics", "and", "themes"], -- specific keywords on this specific piece of text or letter, not generic like "chabad" or "jewish"
-    "questionsAnswered": ["Question?", "Question?"] -- implied questions that the text answers, not questions about the text
+    "questionsAnswered": ["Question?", "Answer"] -- implied questions that the text answers, not questions about the text. This will be used for future training. Please output a full answer, the way an LLM should respond conversationally. Include only information that is explicitly stated in the text, and only that information which answers the question.
 }`
         }),
         chunk: (maxChunkLength, isIncomplete = false) => ({
@@ -72,6 +72,7 @@ export const OPENAI_PROMPTS = {
                 - Each subsequent chunk MUST start right after the previous chunk's ending punctuation
                 - There MUST NOT be any gaps or overlaps between chunks
                 - Include all punctuation in the chunks
+                - If the entire text is one single theme, return a single chunk
                 - Remember that this is Hebrew text, so some characters operate differently than in English and may not indicate the end of a sentence
 
                 Return a valid JSON in the following exact format (no preface):
@@ -98,7 +99,7 @@ export const OPENAI_PROMPTS = {
     metadata: () => ({
         role: "user",
         content: `Analyze the given text chunk and provide detailed metadata in JSON format. Each piece of metadata needs to be standalone, not using ambiguous references like 'the text'. Include:
-    - long_summary (2-3 paragraphs, in English. The audience is familiar with the domain.)
+    - long_summary (1-2 paragraphs, in English. The audience is familiar with the domain.)
     - short_summary (1-2 sentences, in English)
     - quiz_questions (3-5 questions in English. Make sure these can be used standalone and do not ambiguously reference the text.)
     - followup_thinking_questions (2-3 deeper analytical questions, in English)

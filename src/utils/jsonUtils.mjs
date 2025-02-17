@@ -1,16 +1,19 @@
 export function cleanJsonResponse(text) {
-    // First remove any markdown code blocks
-    let cleaned = text.replace(/```[\s\S]*?```/g, match => {
-        const lines = match.split('\n');
-        // Remove the first and last lines (``` markers)
-        return lines.slice(1, -1).join('\n');
-    });
+    // Find the first { and last } to extract just the JSON part
+    const startIndex = text.indexOf('{');
+    const endIndex = text.lastIndexOf('}') + 1;
     
-    // Remove any remaining backticks
-    cleaned = cleaned.replace(/`/g, '');
+    if (startIndex === -1 || endIndex === 0) {
+        throw new Error('No JSON object found in response');
+    }
     
-    // Remove any leading/trailing whitespace and newlines
-    cleaned = cleaned.trim();
+    let cleaned = text.slice(startIndex, endIndex);
+    
+    // Handle Hebrew text by replacing Hebrew quotes with standard ones
+    cleaned = cleaned
+        .replace(/[""]/g, '"')  // Replace curly quotes with straight quotes
+        .replace(/['']/g, "'")  // Replace curly apostrophes with straight ones
+        .replace(/[\u200E\u200F\u202A-\u202E]/g, ''); // Remove Hebrew directional formatting
     
     return cleaned;
 }
@@ -24,15 +27,19 @@ export function parseJsonResponse(text) {
     
     try {
         const cleaned = cleanJsonResponse(text);
-        // Handle Hebrew text by replacing Hebrew quotes with standard ones
-        const normalized = cleaned
-            .replace(/[""]/g, '"')  // Replace curly quotes with straight quotes
-            .replace(/['']/g, "'"); // Replace curly apostrophes with straight ones
-        return JSON.parse(normalized);
+        console.log('Cleaned JSON:');
+        console.log(cleaned);
+        // Remove duplicate normalization since it's already done in cleanJsonResponse
+        return JSON.parse(cleaned);
     } catch (error) {
         console.warn('Failed to parse JSON response. Using empty default.');
         console.warn('Error:', error.message);
-        console.warn('Cleaned text:', cleanJsonResponse(text));
+        console.warn('Error position:', error.message.match(/position (\d+)/)?.[1]);
+        const errorPos = parseInt(error.message.match(/position (\d+)/)?.[1]);
+        if (errorPos) {
+            const context = cleaned.substring(Math.max(0, errorPos - 20), errorPos + 20);
+            console.warn('Context around error:', context);
+        }
         // Return a basic structure that won't break the code
         return { textToRemove: [] };
     }
