@@ -78,26 +78,46 @@ async function convertAndTranslateFile(filepath, prompt) {
 
         console.log('\nAPI Response:', JSON.stringify(response, null, 2));
         
-        let content = response.choices[0].message.content;
-        // Simple cleanup of markdown
-        content = content.replace(/```json\n/, '').replace(/```\n?$/, '');
-        const result = JSON.parse(content);
-        
-        // Save to supabase with API stats and keywords
-        await supabase.from('translations').insert({
-            original_filename: filename,
-            original_text: convertedText,
-            translated_text: result.translation,
-            keywords: result.keywords,
-            timestamp: new Date().toISOString(),
-            prompt_tokens: response.usage.prompt_tokens,
-            completion_tokens: response.usage.completion_tokens,
-            total_tokens: response.usage.total_tokens,
-            model: MODEL,
-            prompt: prompt
-        });
-        
-        console.log(`Processed ${filename}`);
+        try {
+            // Try parsing with no processing first
+            let content = response.choices[0].message.content;
+            try {
+                const result = JSON.parse(content);
+                // If we get here, parsing worked with no processing
+                await supabase.from('translations').insert({
+                    original_filename: filename,
+                    original_text: convertedText,
+                    translated_text: result.translation,
+                    keywords: result.keywords,
+                    timestamp: new Date().toISOString(),
+                    prompt_tokens: response.usage.prompt_tokens,
+                    completion_tokens: response.usage.completion_tokens,
+                    total_tokens: response.usage.total_tokens,
+                    model: MODEL,
+                    prompt: prompt
+                });
+            } catch (parseError) {
+                // If raw parsing failed, try minimal markdown cleanup
+                content = content.replace(/^```json\n/, '').replace(/\n```$/, '');
+                const result = JSON.parse(content);
+                await supabase.from('translations').insert({
+                    original_filename: filename,
+                    original_text: convertedText,
+                    translated_text: result.translation,
+                    keywords: result.keywords,
+                    timestamp: new Date().toISOString(),
+                    prompt_tokens: response.usage.prompt_tokens,
+                    completion_tokens: response.usage.completion_tokens,
+                    total_tokens: response.usage.total_tokens,
+                    model: MODEL,
+                    prompt: prompt
+                });
+            }
+            console.log(`Processed ${filename}`);
+        } catch (error) {
+            console.error(`Error parsing API response:`, error);
+            console.error('Raw content:', response.choices[0].message.content);
+        }
     } catch (error) {
         console.error(`Error processing ${filepath}:`, error);
     }

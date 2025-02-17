@@ -18,10 +18,10 @@ export const OPENAI_SETTINGS = {
         operations: {
             clean: "o3-mini",
             chunk: "o3-mini",
-            metadata: "gpt-4o-mini",
-            summarize: "gpt-4o-mini",
+            metadata: "o1",
+            summarize: "o1",
             sentiment: "o3-mini",
-            fullMetadata: "gpt-4o-mini"
+            fullMetadata: "o1"
         }
     }
 };
@@ -61,7 +61,7 @@ export const OPENAI_PROMPTS = {
 {
     "longDescription": "1-2 paragraphs describing the main content and arguments",
     "keywords": ["array", "of", "key", "topics", "and", "themes"], -- specific keywords on this specific piece of text or letter, not generic like "chabad" or "jewish"
-    "questionsAnswered": ["Question?", "Answer"] -- implied questions that the text answers, not questions about the text. This will be used for future training. Please output a full answer, the way an LLM should respond conversationally. Include only information that is explicitly stated in the text, and only that information which answers the question.
+    "questionsAnswered": ["Question?", "Answer"] -- One Q&A pair: An implied question which the text addresses. This Q&A pair will be used for future training. Please output a thorough, long form answer, the way an LLM should respond conversationally. Include only information that is stated in the text, and only that information which answers the question.
 }`
         }),
         chunk: (maxChunkLength, isIncomplete = false) => ({
@@ -112,7 +112,7 @@ export const OPENAI_PROMPTS = {
     - questions_explicit (directly stated in text, Original Hebrew)
     - questions_implied (suggested by the content, English)
     - reconciled_issues (how the text resolves contradictions, English)
-    - qa_pair (detailed questions and answers, English. Not questions on the text, but questions the user may ask which we can answer based on the text.)
+    - qa_pair (One Q&A pair: implied question which the text answers, not a question about the text. This will be used for future training. Please output a thorough, specific, long form answer, the way an LLM should respond conversationally. Include only information that is explicitly stated in the text, and only that information which answers the question.)
     - potential_typos (array of possible errors, Original Hebrew)
     - identified_abbreviations (array of abbreviations with expansions, Original Hebrew)
     - named_entities (array of people, places, texts mentioned, Original Hebrew)
