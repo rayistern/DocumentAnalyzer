@@ -18,10 +18,10 @@ export const OPENAI_SETTINGS = {
         operations: {
             clean: "o3-mini",
             chunk: "o3-mini",
-            metadata: "o1",
-            summarize: "o1",
+            metadata: "gpt-4o-mini",
+            summarize: "gpt-4o-mini",
             sentiment: "o3-mini",
-            fullMetadata: "o1"
+            fullMetadata: "gpt-4o-mini"
         }
     }
 };
@@ -66,7 +66,7 @@ export const OPENAI_PROMPTS = {
         }),
         chunk: (maxChunkLength, isIncomplete = false) => ({
             role: "user",
-            content: `Segment this text into self-contained sections based on topic shifts. Each chunk should fully capture a concept but remain under ${maxChunkLength} characters.
+            content: `Segment this text into self-contained sections based on topic shifts. Each chunk should fully capture a concept but remain under ${maxChunkLength} characters - and the longer the better.
             ${isIncomplete ? ' (note: this text may be cut off at the end, please ignore any incomplete text)' : ''}
                 - Record the exact first and last complete words of each chunk for validation
                 - Each subsequent chunk MUST start right after the previous chunk's ending punctuation
