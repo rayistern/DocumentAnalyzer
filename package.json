@@ -6,9 +6,9 @@
     "@supabase/supabase-js": "^2.48.1",
     "commander": "^13.1.0",
     "dotenv": "^16.4.7",
+    "glob": "^11.0.1",
     "mammoth": "^1.9.0",
-    "openai": "^4.83.0",
-    "glob": "^11.0.1"
+    "openai": "^4.83.0"
   },
   "scripts": {
     "start": "node src/processDocuments.mjs",

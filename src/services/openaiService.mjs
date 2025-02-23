@@ -167,7 +167,7 @@ function removeMarkdownFormatting(text) {
 async function createChunks(text, maxChunkLength, filepath) {
     try {
         const response = await openai.chat.completions.create(
-            createApiOptions(OPENAI_SETTINGS.model, [
+            createApiOptions(getModelForOperation('chunk'), [
                 {
                     role: OPENAI_PROMPTS.chunk.role,
                     content: OPENAI_PROMPTS.chunk.content(maxChunkLength)
@@ -834,6 +834,7 @@ async function generateMetadata(chunk) {
                 { role: "user", content: chunk.cleanedText }
             ])
         );
+        console.log('Metadata operation used model:', response.model);
         return response.choices[0].message.content;
     });
 }

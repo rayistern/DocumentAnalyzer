@@ -16,12 +16,12 @@ export const OPENAI_SETTINGS = {
         jsonFormatSupported: ['gpt-4o', 'gpt-4o-mini'],
         // Models to use for different operations
         operations: {
-            clean: "o3-mini",
-            chunk: "o3-mini",
+            clean: "gpt-4o-mini",
+            chunk: "gpt-4o-mini",
             metadata: "gpt-4o-mini",
             summarize: "gpt-4o-mini",
-            sentiment: "o3-mini",
-            fullMetadata: "gpt-4o-mini"
+            sentiment: "gpt-4o-mini",
+            fullMetadata: "o1"
         }
     }
 };
