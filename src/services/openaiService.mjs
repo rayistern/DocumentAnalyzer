@@ -439,6 +439,7 @@ async function cleanAndChunkDocument(text, maxChunkLength, filepath, overview) {
                     }
                 ])
             );
+            console.log('Full metadata operation used model:', metadataResponse.model);
             const metadata = parseJsonResponse(removeMarkdownFormatting(metadataResponse.choices[0].message.content));
             console.log('Metadata generated');
 
