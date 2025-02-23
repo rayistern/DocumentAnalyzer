@@ -431,7 +431,7 @@ async function cleanAndChunkDocument(text, maxChunkLength, filepath, overview) {
             // Get metadata for the cleaned text
             console.log('\nGetting metadata for cleaned text...');
             const metadataResponse = await openai.chat.completions.create(
-                createApiOptions(getModelForOperation('metadata'), [
+                createApiOptions(getModelForOperation('fullMetadata'), [
                     OPENAI_PROMPTS.cleanAndChunk.fullMetadata(),
                     {
                         role: "user",
