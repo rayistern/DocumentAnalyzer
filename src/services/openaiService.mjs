@@ -157,11 +157,20 @@ function escapeRegExp(string) {
 }
 
 function removeMarkdownFormatting(text) {
-    return text.replace(/```[\s\S]*?```/g, match => {
-        // Extract content between backticks, removing the first line (```json)
-        const content = match.split('\n').slice(1, -1).join('\n');
-        return content;
-    });
+    // First try to extract content between backticks if present
+    const backtickMatch = text.match(/```(?:json)?\n([\s\S]*?)\n```/);
+    if (backtickMatch) {
+        return backtickMatch[1].trim();
+    }
+    
+    // If no backticks, try to find the first { and last }
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+        return jsonMatch[0];
+    }
+    
+    // If neither found, return original text
+    return text;
 }
 
 async function createChunks(text, maxChunkLength, filepath) {
@@ -430,34 +439,55 @@ async function cleanAndChunkDocument(text, maxChunkLength, filepath, overview) {
 
             // Get metadata for the cleaned text
             console.log('\nGetting metadata for cleaned text...');
-            const metadataResponse = await openai.chat.completions.create(
-                createApiOptions(getModelForOperation('fullMetadata'), [
-                    OPENAI_PROMPTS.cleanAndChunk.fullMetadata(),
-                    {
-                        role: "user",
-                        content: cleanedText
-                    }
-                ])
-            );
-            console.log('Full metadata operation used model:', metadataResponse.model);
-            const metadata = parseJsonResponse(removeMarkdownFormatting(metadataResponse.choices[0].message.content));
-            console.log('Metadata generated');
+            try {
+                const metadataResponse = await openai.chat.completions.create(
+                    createApiOptions(getModelForOperation('fullMetadata'), [
+                        OPENAI_PROMPTS.cleanAndChunk.fullMetadata(),
+                        {
+                            role: "user",
+                            content: cleanedText
+                        }
+                    ])
+                );
+                console.log('Full metadata operation used model:', metadataResponse.model);
+                
+                // Store raw response first
+                const { error: rawError } = await supabase
+                    .from('documents')
+                    .update({ 
+                        raw_llm_response: metadataResponse.choices[0].message.content,
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', document.id);
 
-            // Store metadata with document
-            const { error: metadataError } = await supabase
-                .from('documents')
-                .update({ 
-                    long_description: metadata.longDescription,
-                    keywords: metadata.keywords,
-                    questions_answered: metadata.questionsAnswered,
-                    updated_at: new Date().toISOString()
-                })
-                .eq('id', document.id);
+                if (rawError) {
+                    console.error('Error storing raw response:', rawError);
+                }
+                
+                // Continue with normal metadata processing
+                const cleanedResponse = removeMarkdownFormatting(metadataResponse.choices[0].message.content);
+                console.log('Attempting to parse metadata JSON:', cleanedResponse);
+                const metadata = parseJsonResponse(cleanedResponse);
+                
+                // Store processed metadata
+                const { error: metadataError } = await supabase
+                    .from('documents')
+                    .update({ 
+                        long_description: metadata.longDescription,
+                        keywords: metadata.keywords,
+                        questions_answered: metadata.questionsAnswered,
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', document.id);
 
-            if (metadataError) {
-                console.error('Error saving metadata:', metadataError);
-            } else {
-                console.log('Saved metadata to document');
+                if (metadataError) {
+                    console.error('Error saving metadata:', metadataError);
+                } else {
+                    console.log('Saved metadata to document');
+                }
+            } catch (error) {
+                console.error('Error in metadata generation/saving:', error);
+                console.error('Full error:', error.stack);
             }
 
             // Send cleaned text to LLM for semantic chunking
