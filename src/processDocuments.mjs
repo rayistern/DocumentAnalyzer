@@ -29,6 +29,8 @@ async function processDocuments(options) {
         console.log(`Found ${files.length} files to process`);
         console.log(`Using chunk length: ${options.maxChunkLength}`);
         
+        let previousText = ''; // Track text from previous document
+        
         for (const file of files) {
             const inputPath = path.join(INPUT_DIR, file);
             try {
@@ -79,8 +81,12 @@ async function processDocuments(options) {
                     options.overview,
                     options.skipMetadata,
                     options.continuation,
-                    contentHash  // Pass the hash through
+                    contentHash,
+                    previousText  // Pass the previous text
                 );
+                
+                // Store text for next document if available
+                previousText = result.textForNextDocument || '';
                 
                 // Step 3: Move original file to processed directory
                 const processedPath = path.join(PROCESSED_DIR, file);

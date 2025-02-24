@@ -38,15 +38,19 @@ function getModelForOperation(operation) {
     return OPENAI_SETTINGS.modelConfig.operations[operation] || OPENAI_SETTINGS.model;
 }
 
-export async function processFile(content, type, filepath, maxChunkLength = OPENAI_SETTINGS.defaultMaxChunkLength, overview = '', skipMetadata = false, isContinuation = false, contentHash = null) {
+export async function processFile(content, type, filepath, maxChunkLength = OPENAI_SETTINGS.defaultMaxChunkLength, overview = '', skipMetadata = false, isContinuation = false, contentHash = null, previousText = '') {
     try {
+        let result;
         switch (type) {
             case 'sentiment':
-                return await analyzeSentiment(content);
+                result = await analyzeSentiment(content);
+                break;
             case 'chunk':
-                return await createChunks(content, maxChunkLength, filepath);
+                result = await createChunks(content, maxChunkLength, filepath);
+                break;
             case 'cleanAndChunk':
-                return await cleanAndChunkDocument(content, maxChunkLength, filepath, overview, skipMetadata, isContinuation, contentHash);
+                result = await cleanAndChunkDocument(content, maxChunkLength, filepath, overview, skipMetadata, isContinuation, contentHash, previousText);
+                break;
             case 'fullMetadata_only':
                 // Save initial document
                 const document = await saveAnalysis(content, 'fullMetadata_only', { filepath });
@@ -87,10 +91,12 @@ export async function processFile(content, type, filepath, maxChunkLength = OPEN
                     })
                     .eq('id', document.id);
                 
-                return metadata;
+                result = metadata;
+                break;
             default:
-                return await summarizeContent(content);
+                result = await summarizeContent(content);
         }
+        return result;
     } catch (error) {
         throw new Error(`OpenAI processing failed: ${error.message}`);
     }
@@ -98,98 +104,121 @@ export async function processFile(content, type, filepath, maxChunkLength = OPEN
 
 function cleanText(text, textToRemove) {
     // Normalize quotation marks in the input text
-    const normalizeQuotes = (str) => str.replace(/[""]/g, '"').replace(/['']/g, "'");
+    const normalizeQuotes = (str) => {
+        const normalized = str.replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, '"')  // Various double quotes
+                             .replace(/[\u2018\u2019\u201A\u201B\u2032\u2035]/g, "'")   // Various single quotes
+                             .replace(/[""]/g, '"')
+                             .replace(/['']/g, "'");
+        return normalized;
+    };
     let cleanedText = normalizeQuotes(text);
     const tolerance = OPENAI_SETTINGS.textRemovalPositionTolerance;
     let offset = 0;  // Track how many characters we've removed
 
     if (textToRemove && Array.isArray(textToRemove)) {
         textToRemove.forEach(item => {
-            // Normalize the text to remove
             const normalizedItemText = normalizeQuotes(item.text);
-            
-            // IMPORTANT: First try the exact position the LLM gave us
-            // Only fall back to searching if that fails
             let found = false;
 
-            // Adjust positions based on how much text we've removed so far
+            // Try fuzzy boundary matching first
             const adjustedStart = item.startPosition - 1 - offset;
-            const adjustedEnd = item.endPosition - offset;
-
-            // Try exact position first
-            const exactText = cleanedText.substring(adjustedStart, adjustedEnd);
-            if (exactText === normalizedItemText) {
+            const fuzzyPos = findCompleteBoundary(cleanedText, adjustedStart, normalizedItemText);
+            if (fuzzyPos !== adjustedStart) {
                 found = true;
-                cleanedText = cleanedText.substring(0, adjustedStart) + 
-                            cleanedText.substring(adjustedEnd);
+                cleanedText = cleanedText.substring(0, fuzzyPos) + 
+                            cleanedText.substring(fuzzyPos + normalizedItemText.length);
                 offset += normalizedItemText.length;
-                console.log(`Removed text at exact position: "${normalizedItemText}"`);
+                console.log(`Removed text by fuzzy boundary match: "${normalizedItemText}"`);
             }
 
-            // If exact position fails, search near the position
+            // If fuzzy boundary fails, try other methods
             if (!found) {
-                const searchStart = Math.max(0, adjustedStart - tolerance);
-                const searchEnd = Math.min(cleanedText.length, adjustedEnd + tolerance);
-                const searchArea = cleanedText.substring(searchStart, searchEnd);
+                // Normalize the text to remove
+                const normalizedItemText = normalizeQuotes(item.text);
                 
-                const textPos = searchArea.indexOf(normalizedItemText);
-                if (textPos !== -1) {
-                    found = true;
-                    cleanedText = cleanedText.substring(0, searchStart + textPos) + 
-                                cleanedText.substring(searchStart + textPos + normalizedItemText.length);
-                    offset += normalizedItemText.length;
-                    console.log(`Removed text by position-guided search: "${normalizedItemText}"`);
-                }
-            }
+                // IMPORTANT: First try the exact position the LLM gave us
+                // Only fall back to searching if that fails
+                let found = false;
 
-            // If position-based approaches fail, try context matching
-            if (!found && item.contextBefore && item.contextAfter) {
-                const pattern = escapeRegExp(item.contextBefore + item.text + item.contextAfter);
-                const match = cleanedText.match(new RegExp(pattern));
-                if (match) {
+                // Adjust positions based on how much text we've removed so far
+                const adjustedStart = item.startPosition - 1 - offset;
+                const adjustedEnd = item.endPosition - offset;
+
+                // Try exact position first
+                const exactText = cleanedText.substring(adjustedStart, adjustedEnd);
+                if (exactText === normalizedItemText) {
                     found = true;
-                    const matchStart = match.index + item.contextBefore.length;
-                    cleanedText = cleanedText.substring(0, matchStart) + 
-                                cleanedText.substring(matchStart + item.text.length);
-                    offset += item.text.length;
-                    console.log(`Removed text by context match: "${item.text}"`);
-                } else {
-                    // Try with just before or after context
-                    const beforePattern = escapeRegExp(item.contextBefore + item.text);
-                    const afterPattern = escapeRegExp(item.text + item.contextAfter);
+                    cleanedText = cleanedText.substring(0, adjustedStart) + 
+                                cleanedText.substring(adjustedEnd);
+                    offset += normalizedItemText.length;
+                    console.log(`Removed text at exact position: "${normalizedItemText}"`);
+                }
+
+                // If exact position fails, search near the position
+                if (!found) {
+                    const searchStart = Math.max(0, adjustedStart - tolerance);
+                    const searchEnd = Math.min(cleanedText.length, adjustedEnd + tolerance);
+                    const searchArea = cleanedText.substring(searchStart, searchEnd);
                     
-                    const beforeMatch = cleanedText.match(new RegExp(beforePattern));
-                    const afterMatch = cleanedText.match(new RegExp(afterPattern));
-                    
-                    if (beforeMatch) {
+                    const textPos = searchArea.indexOf(normalizedItemText);
+                    if (textPos !== -1) {
                         found = true;
-                        const matchStart = beforeMatch.index + item.contextBefore.length;
-                        cleanedText = cleanedText.substring(0, matchStart) + 
-                                    cleanedText.substring(matchStart + item.text.length);
-                        offset += item.text.length;
-                        console.log(`Removed text by before-context match: "${item.text}"`);
-                    } else if (afterMatch) {
-                        found = true;
-                        const matchStart = afterMatch.index;
-                        cleanedText = cleanedText.substring(0, matchStart) + 
-                                    cleanedText.substring(matchStart + item.text.length);
-                        offset += item.text.length;
-                        console.log(`Removed text by after-context match: "${item.text}"`);
+                        cleanedText = cleanedText.substring(0, searchStart + textPos) + 
+                                    cleanedText.substring(searchStart + textPos + normalizedItemText.length);
+                        offset += normalizedItemText.length;
+                        console.log(`Removed text by position-guided search: "${normalizedItemText}"`);
                     }
                 }
-            }
 
-            // Last resort: if all else fails and text appears exactly once
-            if (!found) {
-                const matches = cleanedText.match(new RegExp(escapeRegExp(item.text), 'g'));
-                if (matches && matches.length === 1) {
-                    const matchStart = cleanedText.indexOf(item.text);
-                    cleanedText = cleanedText.substring(0, matchStart) + 
-                                cleanedText.substring(matchStart + item.text.length);
-                    offset += item.text.length;
-                    console.log(`Removed text by single exact match: "${item.text}"`);
-                } else {
-                    console.warn(`Warning: Could not find unique text "${item.text}" at position ${item.startPosition}-${item.endPosition} or with context`);
+                // If position-based approaches fail, try context matching
+                if (!found && item.contextBefore && item.contextAfter) {
+                    const pattern = escapeRegExp(item.contextBefore + item.text + item.contextAfter);
+                    const match = cleanedText.match(new RegExp(pattern));
+                    if (match) {
+                        found = true;
+                        const matchStart = match.index + item.contextBefore.length;
+                        cleanedText = cleanedText.substring(0, matchStart) + 
+                                    cleanedText.substring(matchStart + item.text.length);
+                        offset += item.text.length;
+                        console.log(`Removed text by context match: "${item.text}"`);
+                    } else {
+                        // Try with just before or after context
+                        const beforePattern = escapeRegExp(item.contextBefore + item.text);
+                        const afterPattern = escapeRegExp(item.text + item.contextAfter);
+                        
+                        const beforeMatch = cleanedText.match(new RegExp(beforePattern));
+                        const afterMatch = cleanedText.match(new RegExp(afterPattern));
+                        
+                        if (beforeMatch) {
+                            found = true;
+                            const matchStart = beforeMatch.index + item.contextBefore.length;
+                            cleanedText = cleanedText.substring(0, matchStart) + 
+                                        cleanedText.substring(matchStart + item.text.length);
+                            offset += item.text.length;
+                            console.log(`Removed text by before-context match: "${item.text}"`);
+                        } else if (afterMatch) {
+                            found = true;
+                            const matchStart = afterMatch.index;
+                            cleanedText = cleanedText.substring(0, matchStart) + 
+                                        cleanedText.substring(matchStart + item.text.length);
+                            offset += item.text.length;
+                            console.log(`Removed text by after-context match: "${item.text}"`);
+                        }
+                    }
+                }
+
+                // Last resort: if all else fails and text appears exactly once
+                if (!found) {
+                    const matches = cleanedText.match(new RegExp(escapeRegExp(item.text), 'g'));
+                    if (matches && matches.length === 1) {
+                        const matchStart = cleanedText.indexOf(item.text);
+                        cleanedText = cleanedText.substring(0, matchStart) + 
+                                    cleanedText.substring(matchStart + item.text.length);
+                        offset += item.text.length;
+                        console.log(`Removed text by single exact match: "${item.text}"`);
+                    } else {
+                        console.warn(`Warning: Could not find unique text "${item.text}" at position ${item.startPosition}-${item.endPosition} or with context`);
+                    }
                 }
             }
         });
@@ -372,78 +401,38 @@ function findCompleteBoundary(text, position, word) {
     return position;
 }
 
-async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview = '', skipMetadata = false, isContinuation = false, contentHash = null) {
+async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview = '', skipMetadata = false, isContinuation = false, contentHash = null, previousText = '') {
     console.log('Starting clean and chunk process...');
     
-    // If this is a continuation, get the last chunk or remainder from previous document
-    let previousText = '';
-    if (isContinuation) {
-        console.log('Getting previous document context...');
-        const { data: lastDoc, error: lastDocError } = await supabase
-            .from('documents')
-            .select('id')
-            .order('created_at', { ascending: false })
-            .limit(1);
-            
-        if (!lastDocError && lastDoc?.length > 0) {
-            // First try to get remainder
-            const { data: remainder, error: remainderError } = await supabase
-                .from('document_remainders')
-                .select('remainder_text')
-                .eq('document_id', lastDoc[0].id)
-                .single();
-                
-            if (!remainderError && remainder?.remainder_text) {
-                previousText = remainder.remainder_text;
-                console.log('Using remainder from previous document');
-            } else {
-                // If no remainder, get last chunk
-                const { data: lastChunk, error: chunkError } = await supabase
-                    .from('chunks')
-                    .select('cleaned_text')
-                    .eq('document_id', lastDoc[0].id)
-                    .order('end_index', { ascending: false })
-                    .limit(1)
-                    .single();
-                    
-                if (!chunkError && lastChunk) {
-                    previousText = lastChunk.cleaned_text;
-                    console.log('Using last chunk from previous document');
-                }
-            }
-        }
+    // Log previous text info if this is a continuation
+    if (isContinuation && previousText) {
+        console.log('\n=== Continuation Info ===');
+        console.log(`Previous text length: ${previousText.length}`);
+        console.log(`Preview: "${previousText.slice(0, 100)}..."`);
+    } else {
+        console.log('No previous text to prepend');
+        isContinuation = false;
     }
-    
+
     // Save initial document with the raw content hash
     const document = await saveAnalysis(content, skipMetadata ? 'cleanAndChunk' : 'fullMetadata_only', { 
         filepath,
         content_hash: contentHash
     });
-    console.log('Saved original document with ID:', document.id);
-
-    // Create new session for this document
-    const currentSession = {
-        messages: [],
-        documentId: document.id
-    };
+    console.log('Saved document with ID:', document.id);
 
     // Pre-chunk the text
     const preChunks = preChunkText(content, OPENAI_SETTINGS.preChunkSize);
     console.log(`Created ${preChunks.length} pre-chunks`);
-    
+
     let cleanedChunks = [];
     let allTextToRemove = [];
     let remainderText = '';
-    let finalCleanedText = '';  // Store the complete cleaned text
-
-    // Constants for chunk boundary handling
-    const CHUNK_END_OVERLAP = 100; // How much extra text to include at end of chunk for context overlap
+    let finalCleanedText = '';
 
     // Process each pre-chunk
     for (let i = 0; i < preChunks.length; i++) {
-        console.log(`\nProcessing pre-chunk ${i + 1}/${preChunks.length}...`);
-        
-        // Combine remainder with current chunk
+        console.log(`\n=== Processing pre-chunk ${i + 1}/${preChunks.length} ===`);
         const chunk = preChunks[i];
         const combinedText = remainderText + chunk.text;
         console.log(`Combined text length: ${combinedText.length} (${remainderText.length} from remainder)`);
@@ -524,8 +513,13 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         let finalChunkText = cleanedText;
         
         // If this is the first chunk and we have previous text, prepend it
-        if (i === 0 && previousText) {
+        if (i === 0 && previousText && isContinuation) {  // Only prepend if we're still treating as continuation
+            console.log('\nPrepending previous text:');
+            console.log(`- Text length before prepend: ${finalChunkText.length}`);
+            console.log(`- Previous text length: ${previousText.length}`);
+            console.log(`- Previous text preview: "${previousText.slice(0, 100)}..."`);
             finalChunkText = previousText + '\n' + cleanedText;
+            console.log(`- Text length after prepend: ${finalChunkText.length}`);
             console.log('Prepended previous document context');
         }
 
@@ -605,10 +599,7 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         }
 
         // Send cleaned text to LLM for semantic chunking
-        console.log('\nText being sent to LLM for chunking:');
-        console.log('----------------------------------------');
-        console.log(cleanedText);
-        console.log('----------------------------------------\n');
+        console.log('Sending text to LLM for chunking...');
         
         const messages = [
             OPENAI_PROMPTS.cleanAndChunk.chunk(maxChunkLength, !chunk.isComplete),
@@ -626,9 +617,11 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         // Log and parse LLM's chunking response
         console.log('\nLLM Response Analysis:');
         console.log('----------------------------------------');
+        console.log('Raw response:', chunkResponse.choices[0].message.content);
         let parsedResponse;
         try {
             parsedResponse = parseJsonResponse(removeMarkdownFormatting(chunkResponse.choices[0].message.content));
+            console.log('Parsed response:', JSON.stringify(parsedResponse, null, 2));
         } catch (parseError) {
             console.warn('Failed to parse chunk response as JSON:', parseError.message);
             // Store the raw response and continue
@@ -663,209 +656,30 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
 
         // Process chunks and determine remainder text for next iteration
         if (chunkResult.chunks) {
-            // Log pre-chunk information for debugging
-            console.log('\nPre-chunk info:');
-            console.log(`Start position: ${chunk.startPosition}`);
-            console.log(`End position: ${chunk.endPosition}`);
-            console.log(`Remainder length: ${remainderText.length}`);
-            console.log(`Combined text length: ${combinedText.length}`);
-            console.log(`Cleaned text length: ${cleanedText.length}`);
-
-            let cumulativeOffset = 0;  // Track character position differences between what LLM sees vs actual text
-            chunkResult.chunks = chunkResult.chunks.map((c, index) => {
-                // Check if we need to force start after previous chunk
-                let startIndex = c.startIndex;
-                let endIndex = c.endIndex;
-                
-                if (index > 0) {
-                    const gap = startIndex - (chunkResult.chunks[index - 1].endIndex + 1);
-                    if (gap > OPENAI_SETTINGS.gapConfig.maxTolerance) {
-                        startIndex = chunkResult.chunks[index - 1].endIndex + 1;
-                        console.log(`Gap of ${gap} exceeds tolerance. Forcing chunk to start at ${startIndex}`);
-                    }
+            // Validate chunks have required fields
+            chunkResult.chunks = chunkResult.chunks.filter(chunk => {
+                if (!chunk.cleanedText) {
+                    console.warn('Chunk missing cleanedText:', chunk);
+                    return false;
                 }
-                
-                // Debug output
-                console.log('\n=== Chunk processing ===');
-                console.log('LLM returned:');
-                console.log(`- Original positions: ${c.startIndex}-${c.endIndex}`);
-                console.log(`- Adjusted start: ${startIndex}, end: ${endIndex}`);
-                console.log(`- First word: "${c.firstWord}"`);
-                console.log(`- Last word: "${c.lastWord}"`);
-                
-                // The LLM's character counting can differ from our text due to:
-                // 1. Escaped characters being counted differently
-                // 2. Unicode/special characters being interpreted differently
-                // 3. Whitespace normalization
-                // So we need to adjust positions using a cumulative offset
-                const suggestedStartIndex = startIndex + cumulativeOffset;
-                const suggestedEndIndex = endIndex + cumulativeOffset;
-                
-                // Find the actual positions of first/last words within a tolerance range
-                // This is critical for ensuring our chunks start/end exactly where the LLM intended
-                // Chunking strategy:
-                // 1. For chunk starts: Try to find LLM's word, fall back to previous chunk end (or doc start)
-                // 2. For chunk ends: Try to find LLM's word, if not found add overlap to avoid cutting mid-sentence
-                const findWordPosition = (text, targetWord, nearPosition, isStart, previousChunkEnd = 0) => {
-                    // For start positions, just search within tolerance
-                    // For end positions, only add overlap if we can't find the word
-                    const searchStart = Math.max(0, nearPosition - tolerance);
-                    const searchEnd = Math.min(text.length, nearPosition + tolerance);
-                    const searchArea = text.substring(searchStart, searchEnd);
-                    
-                    // First try exact match
-                    const exactIndex = searchArea.indexOf(targetWord);
-                    if (exactIndex !== -1) {
-                        const foundPosition = searchStart + exactIndex;
-                        console.log(`Found exact match "${targetWord}" at position ${foundPosition}`);
-                        return foundPosition;
-                    }
-
-                    // If exact match fails, try fuzzy matching since LLM might truncate words
-                    const words = searchArea.split(/\s+/);
-                    let bestMatch = null;
-                    let bestMatchIndex = -1;
-                    let bestMatchDifference = Infinity;
-
-                    for (let i = 0; i < words.length; i++) {
-                        const word = words[i];
-                        // Allow one character difference for truncation/normalization
-                        if (Math.abs(word.length - targetWord.length) <= 1) {
-                            let differences = 0;
-                            const minLength = Math.min(word.length, targetWord.length);
-                            for (let j = 0; j < minLength; j++) {
-                                if (word[j] !== targetWord[j]) differences++;
-                                if (differences > 1) break;
-                            }
-                            
-                            // Track the best fuzzy match we've found
-                            if (differences <= 1 && differences < bestMatchDifference) {
-                                bestMatch = word;
-                                bestMatchDifference = differences;
-                                // Find this word's position in the search area
-                                const wordPos = searchArea.indexOf(word);
-                                if (wordPos !== -1) {
-                                    bestMatchIndex = searchStart + wordPos;
-                                }
-                            }
-                        }
-                    }
-
-                    if (bestMatchIndex !== -1) {
-                        console.log(`Found fuzzy match "${bestMatch}" for target "${targetWord}" at position ${bestMatchIndex}`);
-                        return bestMatchIndex;
-                    }
-
-                    // If no match found, handle differently for start vs end positions
-                    console.error(`Could not find word "${targetWord}" or similar word near position ${nearPosition}`);
-                    console.error(`Search area (${searchArea.length} chars): "${searchArea}"`);
-                    
-                    if (isStart) {
-                        // For chunk starts, fall back to end of previous chunk (or start of doc)
-                        console.log(`Falling back to previous chunk end: ${previousChunkEnd}`);
-                        return previousChunkEnd;
-                    } else {
-                        // For chunk ends, if we can't find the word, add overlap to avoid cutting mid-sentence
-                        const overlapEnd = Math.min(text.length, nearPosition + CHUNK_END_OVERLAP);
-                        console.log(`No word match found - using overlapped end position: ${overlapEnd}`);
-                        return overlapEnd;
-                    }
-                };
-
-                // Find where the LLM's suggested words actually appear in the text
-                // For the start position, we can use the previous chunk's end as fallback
-                const previousChunkEnd = index > 0 ? chunkResult.chunks[index - 1].endIndex : 0;
-                const adjustedStartIndex = findWordPosition(cleanedText, c.firstWord, suggestedStartIndex, true, previousChunkEnd);
-                
-                // For the end position, we'll allow overlap beyond the LLM's suggestion
-                const adjustedEndIndex = findWordPosition(cleanedText, c.lastWord, suggestedEndIndex, false);
-                
-                // When calculating offsets, we need to ignore the arbitrary overlap we added
-                // This ensures the next chunk's position calculations aren't thrown off
-                const effectiveEndIndex = Math.min(adjustedEndIndex, suggestedEndIndex + tolerance);
-                const newOffset = suggestedEndIndex - effectiveEndIndex;
-                cumulativeOffset -= newOffset;
-                
-                console.log(`Position adjustments:`);
-                console.log(`- Original start: ${c.startIndex}, end: ${c.endIndex}`);
-                console.log(`- Adjusted start: ${adjustedStartIndex + 1}, end: ${adjustedEndIndex}`);
-                console.log(`- Effective end (without overlap): ${effectiveEndIndex}`);
-                console.log(`- Offset this chunk: ${newOffset}, Cumulative: ${cumulativeOffset}`);
-
-                // Extract the text between our found positions (including overlap)
-                const extractedText = cleanedText.substring(adjustedStartIndex, adjustedEndIndex);
-                
-                // Find where the period actually is for validation
-                const periodIndex = cleanedText.indexOf('.', adjustedStartIndex);
-                console.log('\nPosition analysis:');
-                console.log(`- LLM wants to end at: ${c.endIndex}`);
-                console.log(`- Next period is at: ${periodIndex}`);
-                console.log(`- Text up to period:\n${cleanedText.substring(adjustedStartIndex, periodIndex + 1)}`);
-                console.log(`- Text after period:\n${cleanedText.substring(periodIndex + 1, c.endIndex)}`);
-                
-                // Check if our position adjustments stayed within tolerance
-                const positionDifference = Math.abs(suggestedEndIndex - effectiveEndIndex);
-                const withinTolerance = positionDifference <= tolerance;
-                
-                // Get the actual words we found at our chosen positions for validation
-                const actualFirstWord = cleanedText.substring(adjustedStartIndex).split(/\s+/)[0];
-                const actualLastWord = cleanedText.substring(0, effectiveEndIndex).split(/\s+/).pop();
-                
-                // Check if we found the LLM's suggested words (allowing for truncation)
-                const fuzzyMatch = (word1, word2) => {
-                    if (word1 === word2) return true;
-                    if (Math.abs(word1.length - word2.length) > 1) return false;
-                    let differences = 0;
-                    const minLength = Math.min(word1.length, word2.length);
-                    for (let i = 0; i < minLength; i++) {
-                        if (word1[i] !== word2[i]) differences++;
-                        if (differences > 1) return false;
-                    }
-                    return true;
-                };
-                
-                const firstWordMatch = fuzzyMatch(actualFirstWord, c.firstWord);
-                const lastWordMatch = fuzzyMatch(actualLastWord, c.lastWord);
-                
-                console.log('\nWord matching:');
-                console.log(`- First word match: ${firstWordMatch ? 'YES' : 'NO'}`);
-                console.log(`  LLM: "${c.firstWord}"`);
-                console.log(`  Our: "${actualFirstWord}"`);
-                console.log(`- Last word match: ${lastWordMatch ? 'YES' : 'NO'}`);
-                console.log(`  LLM: "${c.lastWord}"`);
-                console.log(`  Our: "${actualLastWord}"`);
-                console.log(`- Within tolerance: ${withinTolerance ? 'YES' : 'NO'}`);
-                console.log(`  LLM wanted: ${suggestedEndIndex}`);
-                console.log(`  We found: ${effectiveEndIndex}`);
-                console.log(`  Difference: ${positionDifference} chars`);
-                
-                return {
-                    startIndex: adjustedStartIndex + 1, // Keep 1-indexed for consistency with LLM
-                    endIndex: adjustedEndIndex,
-                    firstWord: cleanedText.substring(adjustedStartIndex, adjustedStartIndex + c.firstWord.length),
-                    lastWord: cleanedText.substring(adjustedEndIndex - c.lastWord.length, adjustedEndIndex),
-                    cleanedText: extractedText,
-                    original_text: chunk.text, // Store the original chunk text
-                    first_word_match: firstWordMatch,
-                    last_word_match: lastWordMatch,
-                    within_tolerance: withinTolerance,
-                    position_difference: positionDifference,
-                    llm_suggested_end: suggestedEndIndex,
-                    actual_end: adjustedEndIndex
-                };
+                return true;
             });
-
+            
             // Get remainder text for next iteration
-            // This is text after the last chunk that will be combined with the next pre-chunk
             const lastChunk = chunkResult.chunks[chunkResult.chunks.length - 1];
             remainderText = cleanedText.substring(lastChunk.endIndex);
-            console.log(`\nRemainder text length: ${remainderText.length}`);
+            
+            console.log('\n=== Remainder Info ===');
+            console.log(`Total text length: ${cleanedText.length}`);
+            console.log(`Last chunk ends at: ${lastChunk.endIndex}`);
+            console.log(`Remainder length: ${remainderText.length}`);
             if (remainderText.length > 0) {
-                console.log(`Remainder starts with: "${remainderText.slice(0, 50)}..."`);
+                console.log(`Remainder preview: "${remainderText.slice(0, 100)}..."`);
             }
 
             // Accumulate processed chunks
             cleanedChunks = [...cleanedChunks, ...chunkResult.chunks];
+            console.log(`Total chunks so far: ${cleanedChunks.length}`);
             
             // Save chunks to database immediately to preserve progress
             // This ensures we don't lose work if processing fails later
@@ -940,8 +754,11 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
             const chunk = cleanedChunks[i];
             const isLastChunk = i === cleanedChunks.length - 1;
             
-            // Skip metadata for last chunk if this is a continuation and there's no remainder
-            if (isLastChunk && isContinuation && !remainderText.trim()) {
+            // Skip metadata for last chunk only if ALL conditions are met:
+            // 1. There's no remainder text AND
+            // 2. There are more documents in the queue AND
+            // 3. This is a continuation document
+            if (isLastChunk && !remainderText.trim() && isContinuation) {
                 // Check if this is the last file in the queue
                 const { data: nextFile, error: fileError } = await supabase
                     .from('document_sources')
@@ -950,7 +767,7 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                     .limit(1);
                 
                 if (!fileError && nextFile?.length > 0) {
-                    console.log('Skipping metadata for last chunk as this is a continuation');
+                    console.log('Skipping metadata for last chunk - no remainder, more documents in queue, and is continuation');
                     continue;
                 }
             }
@@ -982,32 +799,48 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
     }
     
     // Store the remainder for potential next document
+    let textForNextDocument = '';
     if (remainderText.trim()) {
-        const { error: remainderError } = await supabase
-            .from('document_remainders')
-            .insert({
-                document_id: document.id,
-                remainder_text: remainderText,
-                created_at: new Date().toISOString()
-            });
-            
-        if (remainderError) {
-            console.error('Error saving remainder:', remainderError);
-        }
+        console.log('\n=== Text for Next Document ===');
+        console.log(`Using remainder text of length ${remainderText.length}`);
+        textForNextDocument = remainderText.trim();
+    } else if (cleanedChunks.length > 0) {
+        const lastChunk = cleanedChunks[cleanedChunks.length - 1];
+        console.log('\n=== Text for Next Document ===');
+        console.log('Using last chunk as no remainder exists');
+        textForNextDocument = lastChunk.cleanedText;
     }
     
-    return result;
+    if (textForNextDocument) {
+        console.log(`Preview of text for next doc: "${textForNextDocument.slice(0, 100)}..."`);
+    }
+
+    return {
+        textToRemove: allTextToRemove,
+        chunks: cleanedChunks,
+        warnings,
+        textForNextDocument
+    };
 }
 
 async function generateMetadata(chunk) {
+    if (!chunk || !chunk.cleanedText) {
+        console.error('Invalid chunk or missing cleanedText:', chunk);
+        throw new Error('Cannot generate metadata: chunk has no cleaned text');
+    }
+    console.log('\n=== Chunk Content for Metadata ===');
+    console.log('Chunk length:', chunk.cleanedText.length);
+    console.log('First 100 chars:', chunk.cleanedText.substring(0, 100));
+    
     return retryWithFallback(async (model) => {
+        console.log(`\nAttempting metadata generation with model: ${model}`);
         const response = await openai.chat.completions.create(
-            createApiOptions(getModelForOperation('metadata'), [
+            createApiOptions(model, [
                 OPENAI_PROMPTS.metadata(),
                 { role: "user", content: chunk.cleanedText }
             ])
         );
-        console.log('Metadata operation used model:', response.model);
+        console.log(`Successfully used model: ${response.model}`);
         return response.choices[0].message.content;
     });
 }
