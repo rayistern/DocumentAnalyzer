@@ -21,7 +21,7 @@ export const OPENAI_SETTINGS = {
             metadata: "gpt-4o-mini",
             summarize: "gpt-4o-mini",
             sentiment: "gpt-4o-mini",
-            fullMetadata: "gpt-4o"
+            fullMetadata: "gpt-4o-mini"
         }
     }
 };

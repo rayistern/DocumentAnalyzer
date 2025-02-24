@@ -82,10 +82,15 @@ program
     .option('-r, --reprocess-incomplete', 'reprocess documents that are in processing status')
     .option('--skipMetadata', 'skip the fullMetadata processing step')
     .option('--continuation', 'treat this document as a continuation of the previous one')
+    .option('--reverse', 'process files in reverse order')
     .action(async (pattern, options) => {
         try {
             const files = await glob(pattern);
             files.sort(); // Sort files in ascending order
+            if (options.reverse) {
+                files.reverse();
+                console.log('Processing files in reverse order');
+            }
             console.log(`Found ${files.length} files matching pattern`);
 
             // If continuing from last processed, get the last document
