@@ -17,13 +17,13 @@ export async function saveAnalysis(content, type, metadata = {}) {
         let document;
         
         // For initial document processing, create source record
-        if (type === 'cleanAndChunk') {
+        if (type === 'cleanAndChunk' || type === 'fullMetadata_only') {
             const { data: sourceData, error: sourceError } = await supabase
                 .from('document_sources')
                 .insert({
                     filename: metadata.filepath,
                     original_content: content,
-                    status: 'processing'
+                    status: type
                 })
                 .select()
                 .single();

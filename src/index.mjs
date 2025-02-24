@@ -2,7 +2,7 @@
 
 import { Command } from 'commander';
 import dotenv from 'dotenv';
-import { processFile } from './services/openaiService.mjs';
+import { processFile, batchProcessFullMetadata } from './services/openaiService.mjs';
 import { readTextFile } from './utils/fileReader.mjs';
 import { getAnalysisByType } from './services/supabaseService.mjs';
 import { glob } from 'glob';
@@ -147,6 +147,21 @@ program
             }
         } catch (error) {
             console.error('Batch processing error:', error.message);
+            process.exit(1);
+        }
+    });
+
+program
+    .command('process-metadata')
+    .description('Process fullMetadata for documents')
+    .argument('<ids>', 'comma-separated list of document IDs')
+    .action(async (ids) => {
+        try {
+            const documentIds = ids.split(',').map(id => parseInt(id.trim()));
+            await batchProcessFullMetadata(documentIds);
+            console.log('Metadata processing complete');
+        } catch (error) {
+            console.error('Metadata processing error:', error.message);
             process.exit(1);
         }
     });

@@ -47,6 +47,47 @@ export async function processFile(content, type, filepath, maxChunkLength = OPEN
                 return await createChunks(content, maxChunkLength, filepath);
             case 'cleanAndChunk':
                 return await cleanAndChunkDocument(content, maxChunkLength, filepath, overview);
+            case 'fullMetadata_only':
+                // Save initial document
+                const document = await saveAnalysis(content, 'fullMetadata_only', { filepath });
+                
+                // Process metadata
+                const metadataResponse = await openai.chat.completions.create(
+                    createApiOptions(getModelForOperation('fullMetadata'), [
+                        OPENAI_PROMPTS.cleanAndChunk.fullMetadata(overview),
+                        {
+                            role: "user",
+                            content: `${overview ? overview + '\n\n' : ''}${content}`
+                        }
+                    ])
+                );
+                
+                // Store raw response and metadata
+                const cleanedResponse = removeMarkdownFormatting(metadataResponse.choices[0].message.content);
+                const metadata = parseJsonResponse(cleanedResponse);
+                
+                // Create API metadata object
+                const apiMetadata = {
+                    model: metadataResponse.model,
+                    created: metadataResponse.created,
+                    usage: metadataResponse.usage,
+                    system_fingerprint: metadataResponse.system_fingerprint,
+                    response_ms: Date.now() - (metadataResponse.created * 1000) // Approximate response time
+                };
+                
+                await supabase
+                    .from('documents')
+                    .update({ 
+                        raw_llm_response: metadataResponse.choices[0].message.content,
+                        long_description: metadata.longDescription,
+                        keywords: metadata.keywords,
+                        questions_answered: metadata.questionsAnswered,
+                        api_metadata: apiMetadata,
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', document.id);
+                
+                return metadata;
             default:
                 return await summarizeContent(content);
         }
@@ -483,7 +524,20 @@ async function cleanAndChunkDocument(text, maxChunkLength, filepath, overview) {
                 if (metadataError) {
                     console.error('Error saving metadata:', metadataError);
                 } else {
-                    console.log('Saved metadata to document');
+                    // Update document source status to processed
+                    const { error: statusError } = await supabase
+                        .from('document_sources')
+                        .update({ 
+                            status: 'processed',
+                            updated_at: new Date().toISOString()
+                        })
+                        .eq('id', document.document_source_id);
+
+                    if (statusError) {
+                        console.error(`Error updating status for document ${document.id}:`, statusError);
+                    } else {
+                        console.log('Saved metadata to document');
+                    }
                 }
             } catch (error) {
                 console.error('Error in metadata generation/saving:', error);
@@ -869,3 +923,80 @@ async function generateMetadata(chunk) {
         return response.choices[0].message.content;
     });
 }
+
+export async function batchProcessFullMetadata(documentIds) {
+    for (const docId of documentIds) {
+        try {
+            // Get document from database
+            const { data: document, error: docError } = await supabase
+                .from('documents')
+                .select('*')
+                .eq('id', docId)
+                .single();
+
+            if (docError) {
+                console.error(`Error fetching document ${docId}:`, docError);
+                continue;
+            }
+
+            console.log(`Processing metadata for document ${docId}...`);
+            
+            try {
+                const metadataResponse = await openai.chat.completions.create(
+                    createApiOptions(getModelForOperation('fullMetadata'), [
+                        OPENAI_PROMPTS.cleanAndChunk.fullMetadata(),
+                        {
+                            role: "user",
+                            content: document.content
+                        }
+                    ])
+                );
+                
+                // Store raw response
+                const { error: rawError } = await supabase
+                    .from('documents')
+                    .update({ 
+                        raw_llm_response: metadataResponse.choices[0].message.content,
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', docId);
+
+                if (rawError) {
+                    console.error(`Error storing raw response for document ${docId}:`, rawError);
+                    continue;
+                }
+                
+                // Parse and store metadata
+                const cleanedResponse = removeMarkdownFormatting(metadataResponse.choices[0].message.content);
+                const metadata = parseJsonResponse(cleanedResponse);
+                
+                const { error: metadataError } = await supabase
+                    .from('documents')
+                    .update({ 
+                        long_description: metadata.longDescription,
+                        keywords: metadata.keywords,
+                        questions_answered: metadata.questionsAnswered,
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', docId);
+
+                if (metadataError) {
+                    console.error(`Error saving metadata for document ${docId}:`, metadataError);
+                } else {
+                    // Update document source status to processed
+                    const { error: statusError } = await supabase
+                        .from('document_sources')
+                        .update({ 
+                            status: 'processed',
+                            updated_at: new Date().toISOString()
+                        })
+                        .eq('id', document.document_source_id);
+
+                    if (statusError) {
+                        console.error(`Error updating status for document ${docId}:`, statusError);
+                    } else {
+                        console.log(`Successfully processed metadata for document ${docId}`);
+                    }
+                }
+            } catch (error) {
+                console.error(`

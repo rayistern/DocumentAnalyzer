@@ -28,9 +28,9 @@ export const OPENAI_SETTINGS = {
 
 export const OPENAI_PROMPTS = {
     cleanAndChunk: {
-        clean: (overview = '', isIncomplete = false) => ({
+        clean: (isIncomplete = false) => ({
             role: "user",
-            content: `${overview ? overview + '\n\n' : ''}Identify any text that should be removed from this document${isIncomplete ? ' (note: this text may be cut off at the end, please ignore any incomplete text)' : ''}, such as:
+            content: `Identify any text that should be removed from this document${isIncomplete ? ' (note: this text may be cut off at the end, please ignore any incomplete text)' : ''}, such as:
                 - Page numbers and headers (e.g., "Page 1", "Chapter 1:")
                 - Divider lines (e.g., "----------")
                 - Headers and footers
@@ -55,9 +55,9 @@ export const OPENAI_PROMPTS = {
                     ]
                 }`
         }),
-        fullMetadata: () => ({
+        fullMetadata: (overview = '', ) => ({
             role: "user",
-            content: `Provide metadata (in English) in the following JSON format (with no preface):
+            content: `${overview ? overview + '\n\n' : ''}Provide metadata (in English) in the following JSON format (with no preface):
 {
     "longDescription": "1-2 paragraphs describing the main content and arguments",
     "keywords": ["array", "of", "key", "topics", "and", "themes"], -- specific keywords on this specific piece of text or letter, not generic like "chabad" or "jewish"
