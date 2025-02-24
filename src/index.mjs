@@ -81,6 +81,7 @@ program
     .option('-c, --continue', 'continue from last processed document')
     .option('-r, --reprocess-incomplete', 'reprocess documents that are in processing status')
     .option('--skipMetadata', 'skip the fullMetadata processing step')
+    .option('--continuation', 'treat this document as a continuation of the previous one')
     .action(async (pattern, options) => {
         try {
             const files = await glob(pattern);
@@ -136,7 +137,8 @@ program
                         filename,
                         parseInt(options.maxChunkLength),
                         options.overview,
-                        options.skipMetadata
+                        options.skipMetadata,
+                        options.continuation
                     );
 
                     console.log(`Successfully processed ${filename}`);

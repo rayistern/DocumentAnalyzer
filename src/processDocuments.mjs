@@ -8,6 +8,7 @@ import path from 'path';
 import { checkDocumentExists } from './services/dbService.mjs';
 import { checkDuplicateDocument } from './utils/deduplication.mjs';
 import { saveAnalysis } from './services/supabaseService.mjs';
+import { calculateContentHash } from './utils/hash.mjs';
 
 const INPUT_DIR = 'inputFiles';
 const PROCESSED_DIR = 'processedFiles';
@@ -52,11 +53,15 @@ async function processDocuments(options) {
                 if (isDuplicate) {
                     console.log(`Found duplicate content (Document ID: ${documentId})`);
                     
+                    // Calculate hash once and pass it through
+                    const contentHash = calculateContentHash(text);
+                    
                     // Save the document with skipped_duplicate status
                     await saveAnalysis(text, 'skipped_duplicate', {
                         filepath: filename,
                         duplicate_of: documentId,
-                        warnings: [`Duplicate of document ${documentId}`]
+                        warnings: [`Duplicate of document ${documentId}`],
+                        content_hash: contentHash  // Pass the hash
                     });
                     
                     console.log(`Skipping ${filename} - recorded as duplicate of document ${documentId}`);
@@ -66,9 +71,21 @@ async function processDocuments(options) {
                 const txtPath = path.join(TEMP_DIR, `${path.parse(file).name}.txt`);
                 await fs.writeFile(txtPath, text, 'utf8');
                 
+                // Calculate hash once here for non-duplicates
+                const contentHash = calculateContentHash(text);
+                
                 // Step 2: Clean and chunk the text
                 console.log('Cleaning and chunking...');
-                const result = await processFile(text, 'cleanAndChunk', file, options.maxChunkLength, options.overview);
+                const result = await processFile(
+                    text, 
+                    options.type, 
+                    filename,
+                    parseInt(options.maxChunkLength),
+                    options.overview,
+                    options.skipMetadata,
+                    options.continuation,
+                    contentHash  // Pass the hash through
+                );
                 
                 // Step 3: Move original file to processed directory
                 const processedPath = path.join(PROCESSED_DIR, file);

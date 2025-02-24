@@ -34,13 +34,14 @@ export const OPENAI_PROMPTS = {
                 - Page numbers and headers (e.g., "Page 1", "Chapter 1:")
                 - Divider lines (e.g., "----------")
                 - Headers and footers
+                - Titles and subtitles
                 - Footnotes, citations, and references
                 - Footnote numbers or reference markers within the body of the text (along with their punctuation)
                 - Version numbers or draft markings
                 - Any other non-content structural elements
 
                 For each piece of text to remove, provide:
-                1. The exact text to remove
+                1. The exact text to remove, including punctuation
                 2. Its start and end positions
                 3. 10 characters of context before and after (if available)
 
@@ -71,7 +72,7 @@ export const OPENAI_PROMPTS = {
         chunk: (maxChunkLength, isIncomplete = false) => ({
             role: "user",
             content: `Segment this text into self-contained sections based on topic shifts. Each chunk should fully capture a concept but remain under ${maxChunkLength} characters - and the longer the better.
-            ${isIncomplete ? ' (note: this text may be cut off at the end, please ignore any incomplete text)' : ''}
+            ${isIncomplete ? ' (note: this text may be cut off at the end, please ignore any incomplete text and on our end we will prepend that to the upcoming text we send your way. Leave the end of the document "unchunked" and we will automatically see that.)' : ''}
                 - Record the exact first and last complete words of each chunk for validation
                 - Each subsequent chunk MUST start right after the previous chunk's ending punctuation
                 - There MUST NOT be any gaps or overlaps between chunks

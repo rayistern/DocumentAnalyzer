@@ -38,7 +38,7 @@ function getModelForOperation(operation) {
     return OPENAI_SETTINGS.modelConfig.operations[operation] || OPENAI_SETTINGS.model;
 }
 
-export async function processFile(content, type, filepath, maxChunkLength = OPENAI_SETTINGS.defaultMaxChunkLength, overview = '', skipMetadata = false) {
+export async function processFile(content, type, filepath, maxChunkLength = OPENAI_SETTINGS.defaultMaxChunkLength, overview = '', skipMetadata = false, isContinuation = false, contentHash = null) {
     try {
         switch (type) {
             case 'sentiment':
@@ -46,7 +46,7 @@ export async function processFile(content, type, filepath, maxChunkLength = OPEN
             case 'chunk':
                 return await createChunks(content, maxChunkLength, filepath);
             case 'cleanAndChunk':
-                return await cleanAndChunkDocument(content, maxChunkLength, filepath, overview, skipMetadata);
+                return await cleanAndChunkDocument(content, maxChunkLength, filepath, overview, skipMetadata, isContinuation, contentHash);
             case 'fullMetadata_only':
                 // Save initial document
                 const document = await saveAnalysis(content, 'fullMetadata_only', { filepath });
@@ -363,11 +363,53 @@ function findCompleteBoundary(text, position, word) {
     return position;
 }
 
-async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview = '', skipMetadata = false) {
+async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview = '', skipMetadata = false, isContinuation = false, contentHash = null) {
     console.log('Starting clean and chunk process...');
     
-    // Save initial document
-    const document = await saveAnalysis(content, skipMetadata ? 'cleanAndChunk' : 'fullMetadata_only', { filepath });
+    // If this is a continuation, get the last chunk or remainder from previous document
+    let previousText = '';
+    if (isContinuation) {
+        console.log('Getting previous document context...');
+        const { data: lastDoc, error: lastDocError } = await supabase
+            .from('documents')
+            .select('id')
+            .order('created_at', { ascending: false })
+            .limit(1);
+            
+        if (!lastDocError && lastDoc?.length > 0) {
+            // First try to get remainder
+            const { data: remainder, error: remainderError } = await supabase
+                .from('document_remainders')
+                .select('remainder_text')
+                .eq('document_id', lastDoc[0].id)
+                .single();
+                
+            if (!remainderError && remainder?.remainder_text) {
+                previousText = remainder.remainder_text;
+                console.log('Using remainder from previous document');
+            } else {
+                // If no remainder, get last chunk
+                const { data: lastChunk, error: chunkError } = await supabase
+                    .from('chunks')
+                    .select('cleaned_text')
+                    .eq('document_id', lastDoc[0].id)
+                    .order('end_index', { ascending: false })
+                    .limit(1)
+                    .single();
+                    
+                if (!chunkError && lastChunk) {
+                    previousText = lastChunk.cleaned_text;
+                    console.log('Using last chunk from previous document');
+                }
+            }
+        }
+    }
+    
+    // Save initial document with the raw content hash
+    const document = await saveAnalysis(content, skipMetadata ? 'cleanAndChunk' : 'fullMetadata_only', { 
+        filepath,
+        content_hash: contentHash
+    });
     console.log('Saved original document with ID:', document.id);
 
     // Create new session for this document
@@ -422,7 +464,7 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         console.log('Cleaning text chunk...');
         const cleanResponse = await openai.chat.completions.create(
             createApiOptions(getModelForOperation('clean'), [
-                OPENAI_PROMPTS.cleanAndChunk.clean('', !chunk.isComplete),
+                OPENAI_PROMPTS.cleanAndChunk.clean('', true), // Always set isIncomplete=true for continuations
                 {
                     role: "user",
                     content: combinedText
@@ -470,6 +512,13 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
 
         // Clean the combined text by removing unwanted text segments
         const cleanedText = cleanText(combinedText, cleanResult.textToRemove);
+        
+        // If this is the first chunk and we have previous text, prepend it
+        if (i === 0 && previousText) {
+            cleanedText = previousText + '\n' + cleanedText;
+            console.log('Prepended previous document context');
+        }
+
         finalCleanedText += cleanedText;  // Accumulate cleaned text
         console.log(`Cleaned text length: ${cleanedText.length}`);
         console.log('First 100 chars of cleaned text:', cleanedText.substring(0, 100));
@@ -879,6 +928,24 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         console.log(`\nGenerating metadata for ${cleanedChunks.length} chunks...`);
         for (let i = 0; i < cleanedChunks.length; i++) {
             const chunk = cleanedChunks[i];
+            const isLastChunk = i === cleanedChunks.length - 1;
+            
+            // Skip metadata for last chunk if this is a continuation and there's no remainder
+            // Unless this is the last file in the queue
+            if (isLastChunk && isContinuation && !remainderText.trim()) {
+                // Check if this is the last file in the queue
+                const { data: nextFile, error: fileError } = await supabase
+                    .from('document_sources')
+                    .select('id')
+                    .gt('created_at', new Date().toISOString())
+                    .limit(1);
+                
+                if (!fileError && nextFile?.length > 0) {
+                    console.log('Skipping metadata for last chunk as this is a continuation');
+                    continue;
+                }
+            }
+
             console.log(`\nGenerating metadata for chunk ${i + 1}/${cleanedChunks.length}...`);
             try {
                 const metadata = await generateMetadata(chunk);
@@ -902,6 +969,21 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
             } catch (metadataError) {
                 console.error(`Error generating metadata for chunk ${i + 1}:`, metadataError);
             }
+        }
+    }
+    
+    // Store the remainder for potential next document
+    if (remainderText.trim()) {
+        const { error: remainderError } = await supabase
+            .from('document_remainders')
+            .insert({
+                document_id: document.id,
+                remainder_text: remainderText,
+                created_at: new Date().toISOString()
+            });
+            
+        if (remainderError) {
+            console.error('Error saving remainder:', remainderError);
         }
     }
     
