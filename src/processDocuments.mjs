@@ -79,6 +79,12 @@ async function processDocuments(options) {
                 if (result.warnings && result.warnings.length > 0) {
                     console.log('Warnings:', result.warnings);
                 }
+
+                // When saving analysis, use the skipMetadata option:
+                await saveAnalysis(text, options.skipMetadata ? 'cleanAndChunk' : 'fullMetadata_only', {
+                    filepath: filename,
+                    warnings: result.warnings || []
+                });
             } catch (error) {
                 console.error(`Error processing ${file}:`, error.message);
                 // Save failed status
@@ -110,6 +116,7 @@ program
     .option('-m, --maxChunkLength <number>', 'maximum length of each chunk', parseInt)
     .option('-o, --overview <text>', 'overview text to include in the prompt')
     .option('-r, --reprocessIncomplete', 'reprocess documents that are in processing status')
+    .option('-s, --skipMetadata', 'skip the fullMetadata processing step')
     .action(async (options) => {
         options.maxChunkLength = options.maxChunkLength || 2000;
         await processDocuments(options);

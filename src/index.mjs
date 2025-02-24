@@ -80,6 +80,7 @@ program
     .option('-s, --start-from <filename>', 'start processing from this file')
     .option('-c, --continue', 'continue from last processed document')
     .option('-r, --reprocess-incomplete', 'reprocess documents that are in processing status')
+    .option('--skipMetadata', 'skip the fullMetadata processing step')
     .action(async (pattern, options) => {
         try {
             const files = await glob(pattern);
