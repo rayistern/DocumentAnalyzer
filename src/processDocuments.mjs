@@ -6,6 +6,8 @@ import { Command } from 'commander';
 import fs from 'fs/promises';
 import path from 'path';
 import { checkDocumentExists } from './services/dbService.mjs';
+import { checkDuplicateDocument } from './utils/deduplication.mjs';
+import { saveAnalysis } from './services/supabaseService.mjs';
 
 const INPUT_DIR = 'inputFiles';
 const PROCESSED_DIR = 'processedFiles';
@@ -44,6 +46,23 @@ async function processDocuments(options) {
                 // Step 1: Convert to text if needed
                 console.log('Converting to text...');
                 const text = await convertToText(inputPath);
+                
+                // Check for duplicate content
+                const { isDuplicate, documentId } = await checkDuplicateDocument(text);
+                if (isDuplicate) {
+                    console.log(`Found duplicate content (Document ID: ${documentId})`);
+                    
+                    // Save the document with skipped_duplicate status
+                    await saveAnalysis(text, 'skipped_duplicate', {
+                        filepath: filename,
+                        duplicate_of: documentId,
+                        warnings: [`Duplicate of document ${documentId}`]
+                    });
+                    
+                    console.log(`Skipping ${filename} - recorded as duplicate of document ${documentId}`);
+                    continue;
+                }
+                
                 const txtPath = path.join(TEMP_DIR, `${path.parse(file).name}.txt`);
                 await fs.writeFile(txtPath, text, 'utf8');
                 

@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import dotenv from 'dotenv'
 import { parseJsonResponse } from '../utils/jsonUtils.mjs'
+import { calculateContentHash } from '../utils/deduplication.mjs'
 
 dotenv.config()
 
@@ -16,20 +17,23 @@ export async function saveAnalysis(content, type, metadata = {}) {
         let documentSourceId;
         let document;
         
-        // For initial document processing, create source record
-        if (type === 'cleanAndChunk' || type === 'fullMetadata_only') {
+        // For initial document processing or skipped duplicates, create source record
+        if (type === 'cleanAndChunk' || type === 'fullMetadata_only' || type === 'skipped_duplicate') {
             const { data: sourceData, error: sourceError } = await supabase
                 .from('document_sources')
                 .insert({
                     filename: metadata.filepath,
                     original_content: content,
-                    status: type
+                    status: type === 'skipped_duplicate' ? 'skipped' : type
                 })
                 .select()
                 .single();
                 
             if (sourceError) throw sourceError;
             documentSourceId = sourceData.id;
+
+            // Calculate content hash
+            const contentHash = calculateContentHash(content);
 
             // Save initial document
             const { data: docData, error: docError } = await supabase
@@ -39,7 +43,10 @@ export async function saveAnalysis(content, type, metadata = {}) {
                     type,
                     warnings: metadata.warnings || [],
                     original_filename: metadata.filepath,
-                    document_source_id: documentSourceId
+                    document_source_id: documentSourceId,
+                    content_hash: contentHash,
+                    status: type === 'skipped_duplicate' ? 'skipped_duplicate' : 'pending',
+                    duplicate_of: type === 'skipped_duplicate' ? metadata.duplicate_of : null
                 })
                 .select()
                 .single();
