@@ -52,6 +52,10 @@ async function processDocuments(options) {
                 
                 // Calculate hash and check for duplicate content immediately
                 const contentHash = calculateContentHash(text);
+                console.log('\n=== PROCESSING DOCUMENT ===');
+                console.log('File:', filename);
+                console.log('Content hash:', contentHash);
+
                 const { isDuplicate, documentId } = await checkDuplicateDocument(text);
                 if (isDuplicate) {
                     console.log(`Found duplicate content (Document ID: ${documentId})`);

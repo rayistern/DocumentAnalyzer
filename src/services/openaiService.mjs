@@ -40,6 +40,13 @@ function getModelForOperation(operation) {
 
 export async function processFile(content, type, filepath, maxChunkLength = OPENAI_SETTINGS.defaultMaxChunkLength, overview = '', skipMetadata = false, isContinuation = false, contentHash = null) {
     try {
+        console.log('\n=== Processing File ===');
+        console.log('Type:', type);
+        console.log('Filepath:', filepath);
+        console.log('Content Hash:', contentHash);
+        console.log('Content Length:', content?.length || 0);
+        console.log('=====================\n');
+
         switch (type) {
             case 'sentiment':
                 return await analyzeSentiment(content);
@@ -49,6 +56,21 @@ export async function processFile(content, type, filepath, maxChunkLength = OPEN
                 return await cleanAndChunkDocument(content, maxChunkLength, filepath, overview, skipMetadata, isContinuation, contentHash);
             case 'fullMetadata_only':
                 // Save initial document
+                console.log('Content hash for deduplication:', contentHash);
+                
+                // Check for existing document with this hash
+                const { data: existingDoc, error: hashSearchError } = await supabase
+                    .from('documents')
+                    .select('id, filepath')
+                    .eq('content_hash', contentHash)
+                    .single();
+                    
+                if (hashSearchError) {
+                    console.log('No existing document found with hash:', contentHash);
+                } else {
+                    console.log('Found existing document:', existingDoc);
+                }
+                
                 const document = await saveAnalysis(content, 'fullMetadata_only', { filepath });
                 
                 // Process metadata
@@ -97,8 +119,32 @@ export async function processFile(content, type, filepath, maxChunkLength = OPEN
 }
 
 function cleanText(text, textToRemove) {
-    // Normalize quotation marks in the input text
-    const normalizeQuotes = (str) => str.replace(/[""]/g, '"').replace(/['']/g, "'");
+    // Enhanced quote normalization with validation
+    const normalizeQuotes = (str) => {
+        const normalized = str
+            .replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, '"')  // Various double quotes
+            .replace(/[\u2018\u2019\u201A\u201B\u2032\u2035]/g, "'")   // Various single quotes
+            .replace(/[\u05F4\u05F3]/g, '"')  // Hebrew quotes
+            .replace(/[\u05BE]/g, '-')        // Hebrew hyphen
+            .replace(/[\u05C3]/g, '.')        // Hebrew period
+            .replace(/[""]/g, '"')
+            .replace(/['']/g, "'")
+            // Remove Hebrew diacritics
+            .replace(/[\u0591-\u05C7\u05B0-\u05BB\u05BC\u05BD\u05BF\u05C1\u05C2]/g, '')
+            .replace(/\s+/g, ' ');
+        
+        // Validate no quotes were accidentally converted to spaces
+        const beforeQuoteCount = (str.match(/[""'']/g) || []).length;
+        const afterQuoteCount = (normalized.match(/["']/g) || []).length;
+        if (beforeQuoteCount > afterQuoteCount) {
+            console.warn(`Warning: Quote normalization may have lost quotes. Before: ${beforeQuoteCount}, After: ${afterQuoteCount}`);
+            console.warn('Original text:', str);
+            console.warn('Normalized text:', normalized);
+        }
+        
+        return normalized.trim();
+    };
+
     let cleanedText = normalizeQuotes(text);
     const tolerance = OPENAI_SETTINGS.textRemovalPositionTolerance;
     let offset = 0;  // Track how many characters we've removed
@@ -312,10 +358,8 @@ async function analyzeSentiment(text) {
 
 function validateChunks(chunks, cleanedText) {
     const documentWarnings = [];
-    console.log('\nValidating chunks against cleaned text:', cleanedText);
     
     chunks.forEach((chunk, index) => {
-        console.log(`\nValidating chunk ${index + 1}:`, chunk);
         const chunkWarnings = [];
         
         if (index > 0) {
@@ -328,7 +372,6 @@ function validateChunks(chunks, cleanedText) {
         }
 
         const chunkText = cleanedText.slice(chunk.startIndex - 1, chunk.endIndex);
-        console.log(`Chunk text from cleaned text: "${chunkText}"`);
         const endsWithPeriod = chunkText.trim().match(/[.!?]$/);
 
         if (!endsWithPeriod) {
@@ -415,6 +458,21 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
     }
     
     // Save initial document with the raw content hash
+    console.log('Content hash for deduplication:', contentHash);
+    
+    // Check for existing document with this hash
+    const { data: existingDoc, error: hashSearchError } = await supabase
+        .from('documents')
+        .select('id, filepath')
+        .eq('content_hash', contentHash)
+        .single();
+        
+    if (hashSearchError) {
+        console.log('No existing document found with hash:', contentHash);
+    } else {
+        console.log('Found existing document:', existingDoc);
+    }
+    
     const document = await saveAnalysis(content, skipMetadata ? 'cleanAndChunk' : 'fullMetadata_only', { 
         filepath,
         content_hash: contentHash
@@ -525,13 +583,17 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         
         // If this is the first chunk and we have previous text, prepend it
         if (i === 0 && previousText) {
+            console.log('\nPrepending previous text:');
+            console.log('Previous text:', previousText.substring(0, 100) + '...');
+            console.log('Current cleaned text:', cleanedText.substring(0, 100) + '...');
             finalChunkText = previousText + '\n' + cleanedText;
-            console.log('Prepended previous document context');
+            console.log('Combined text:', finalChunkText.substring(0, 100) + '...');
         }
 
         finalCleanedText += finalChunkText;  // Accumulate cleaned text
-        console.log(`Cleaned text length: ${finalChunkText.length}`);
-        console.log('First 100 chars of cleaned text:', finalChunkText.substring(0, 100));
+        console.log(`\nText flow analysis:`);
+        console.log(`- Cleaned text length: ${finalChunkText.length}`);
+        console.log(`- First 100 chars of final chunk text:`, finalChunkText.substring(0, 100));
 
         // Update document with current cleaned text
         await saveCleanedDocument(document.id, finalCleanedText, content, OPENAI_SETTINGS.model);
@@ -605,18 +667,20 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         }
 
         // Send cleaned text to LLM for semantic chunking
-        console.log('\nText being sent to LLM for chunking:');
+        console.log('\nPreparing text for LLM chunking:');
         console.log('----------------------------------------');
-        console.log(cleanedText);
+        console.log('Text being sent to LLM:', finalChunkText);
         console.log('----------------------------------------\n');
         
         const messages = [
             OPENAI_PROMPTS.cleanAndChunk.chunk(maxChunkLength, !chunk.isComplete),
             {
                 role: "user",
-                content: cleanedText
+                content: finalChunkText
             }
         ];
+        
+        console.log('LLM payload:', JSON.stringify(messages, null, 2));
         
         // Get semantic chunks from LLM
         const chunkResponse = await openai.chat.completions.create(
