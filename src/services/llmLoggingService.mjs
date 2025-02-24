@@ -10,7 +10,6 @@ const supabase = createClient(
 
 export async function logLLMResponse(prompt, response, model) {
   try {
-    console.log(`Logging LLM response for model: ${model}`)
     const { error } = await supabase
       .from('llm_logs')
       .insert({
