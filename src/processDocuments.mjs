@@ -48,20 +48,18 @@ async function processDocuments(options) {
                 console.log('Converting to text...');
                 const text = await convertToText(inputPath);
                 
-                // Check for duplicate content
+                // Calculate hash and check for duplicate content immediately
+                const contentHash = calculateContentHash(text);
                 const { isDuplicate, documentId } = await checkDuplicateDocument(text);
                 if (isDuplicate) {
                     console.log(`Found duplicate content (Document ID: ${documentId})`);
-                    
-                    // Calculate hash once and pass it through
-                    const contentHash = calculateContentHash(text);
                     
                     // Save the document with skipped_duplicate status
                     await saveAnalysis(text, 'skipped_duplicate', {
                         filepath: filename,
                         duplicate_of: documentId,
                         warnings: [`Duplicate of document ${documentId}`],
-                        content_hash: contentHash  // Pass the hash
+                        content_hash: contentHash
                     });
                     
                     console.log(`Skipping ${filename} - recorded as duplicate of document ${documentId}`);
@@ -70,9 +68,6 @@ async function processDocuments(options) {
                 
                 const txtPath = path.join(TEMP_DIR, `${path.parse(file).name}.txt`);
                 await fs.writeFile(txtPath, text, 'utf8');
-                
-                // Calculate hash once here for non-duplicates
-                const contentHash = calculateContentHash(text);
                 
                 // Step 2: Clean and chunk the text
                 console.log('Cleaning and chunking...');

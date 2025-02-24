@@ -33,7 +33,7 @@ export const OPENAI_PROMPTS = {
             content: `This is a page from Likkutei Torah. Identify any text that should be removed from this document${isIncomplete ? ' (note: this text may be cut off at the end, please ignore any incomplete text)' : ''}, such as:
                 - Page numbers and headers (e.g., "Page 1", "Chapter 1:")
                 - Divider lines (e.g., "----------")
-                - Headers and footers
+                - Headers and footers (the top of each page may have the book / chapter / page number, for example - remove that whole string.)
                 - Titles and subtitles
                 - Footnotes, citations, and references
                 - Footnote numbers or reference markers within the body of the text (along with their punctuation)
@@ -101,9 +101,9 @@ export const OPENAI_PROMPTS = {
         role: "user",
         content: "Analyze the sentiment of the text and provide a JSON response with 'sentiment' (positive/negative/neutral), 'score' (1-5), and 'confidence' (0-1) fields."
     },
-    metadata: () => ({
+    metadata: ( isIncomplete = false) => ({
         role: "user",
-        content: `Analyze the given text chunk and provide detailed metadata in JSON format. Each piece of metadata needs to be standalone, not using ambiguous references like 'the text'. Include:
+        content: `Analyze the given text chunk and provide detailed metadata in JSON format. Each piece of metadata needs to be self contained, not using ambiguous references like 'the text'. ${isIncomplete ? ' Take into account the relative position of the text chunk in the flow of the document.' : ''} Include:
     - long_summary (1-2 paragraphs, in English. The audience is familiar with the domain.)
     - short_summary (1-2 sentences, in English)
     - quiz_questions (3-5 questions in English. Make sure these can be used standalone and do not ambiguously reference the text.)

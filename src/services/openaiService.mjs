@@ -97,12 +97,17 @@ export async function processFile(content, type, filepath, maxChunkLength = OPEN
 }
 
 function cleanText(text, textToRemove) {
-    let cleanedText = text;
+    // Normalize quotation marks in the input text
+    const normalizeQuotes = (str) => str.replace(/[""]/g, '"').replace(/['']/g, "'");
+    let cleanedText = normalizeQuotes(text);
     const tolerance = OPENAI_SETTINGS.textRemovalPositionTolerance;
     let offset = 0;  // Track how many characters we've removed
 
     if (textToRemove && Array.isArray(textToRemove)) {
         textToRemove.forEach(item => {
+            // Normalize the text to remove
+            const normalizedItemText = normalizeQuotes(item.text);
+            
             // IMPORTANT: First try the exact position the LLM gave us
             // Only fall back to searching if that fails
             let found = false;
@@ -113,12 +118,12 @@ function cleanText(text, textToRemove) {
 
             // Try exact position first
             const exactText = cleanedText.substring(adjustedStart, adjustedEnd);
-            if (exactText === item.text) {
+            if (exactText === normalizedItemText) {
                 found = true;
                 cleanedText = cleanedText.substring(0, adjustedStart) + 
                             cleanedText.substring(adjustedEnd);
-                offset += item.text.length;
-                console.log(`Removed text at exact position: "${item.text}"`);
+                offset += normalizedItemText.length;
+                console.log(`Removed text at exact position: "${normalizedItemText}"`);
             }
 
             // If exact position fails, search near the position
@@ -127,13 +132,13 @@ function cleanText(text, textToRemove) {
                 const searchEnd = Math.min(cleanedText.length, adjustedEnd + tolerance);
                 const searchArea = cleanedText.substring(searchStart, searchEnd);
                 
-                const textPos = searchArea.indexOf(item.text);
+                const textPos = searchArea.indexOf(normalizedItemText);
                 if (textPos !== -1) {
                     found = true;
                     cleanedText = cleanedText.substring(0, searchStart + textPos) + 
-                                cleanedText.substring(searchStart + textPos + item.text.length);
-                    offset += item.text.length;
-                    console.log(`Removed text by position-guided search: "${item.text}"`);
+                                cleanedText.substring(searchStart + textPos + normalizedItemText.length);
+                    offset += normalizedItemText.length;
+                    console.log(`Removed text by position-guided search: "${normalizedItemText}"`);
                 }
             }
 
@@ -350,12 +355,16 @@ function validateChunks(chunks, cleanedText) {
 }
 
 function findCompleteBoundary(text, position, word) {
+    // Normalize quotation marks in both the search text and word
+    const normalizeQuotes = (str) => str.replace(/[""]/g, '"').replace(/['']/g, "'");
+    
     // Look for the word within tolerance range
     const start = Math.max(0, position - tolerance);
     const end = Math.min(text.length, position + tolerance);
-    const searchText = text.substring(start, end);
+    const searchText = normalizeQuotes(text.substring(start, end));
+    const normalizedWord = normalizeQuotes(word);
     
-    const wordIndex = searchText.indexOf(word);
+    const wordIndex = searchText.indexOf(normalizedWord);
     if (wordIndex !== -1) {
         return start + wordIndex;
     }
@@ -512,16 +521,17 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
 
         // Clean the combined text by removing unwanted text segments
         const cleanedText = cleanText(combinedText, cleanResult.textToRemove);
+        let finalChunkText = cleanedText;
         
         // If this is the first chunk and we have previous text, prepend it
         if (i === 0 && previousText) {
-            cleanedText = previousText + '\n' + cleanedText;
+            finalChunkText = previousText + '\n' + cleanedText;
             console.log('Prepended previous document context');
         }
 
-        finalCleanedText += cleanedText;  // Accumulate cleaned text
-        console.log(`Cleaned text length: ${cleanedText.length}`);
-        console.log('First 100 chars of cleaned text:', cleanedText.substring(0, 100));
+        finalCleanedText += finalChunkText;  // Accumulate cleaned text
+        console.log(`Cleaned text length: ${finalChunkText.length}`);
+        console.log('First 100 chars of cleaned text:', finalChunkText.substring(0, 100));
 
         // Update document with current cleaned text
         await saveCleanedDocument(document.id, finalCleanedText, content, OPENAI_SETTINGS.model);
@@ -931,7 +941,6 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
             const isLastChunk = i === cleanedChunks.length - 1;
             
             // Skip metadata for last chunk if this is a continuation and there's no remainder
-            // Unless this is the last file in the queue
             if (isLastChunk && isContinuation && !remainderText.trim()) {
                 // Check if this is the last file in the queue
                 const { data: nextFile, error: fileError } = await supabase
