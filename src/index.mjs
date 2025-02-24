@@ -134,7 +134,8 @@ program
                         options.type, 
                         filename,
                         parseInt(options.maxChunkLength),
-                        options.overview
+                        options.overview,
+                        options.skipMetadata
                     );
 
                     console.log(`Successfully processed ${filename}`);
