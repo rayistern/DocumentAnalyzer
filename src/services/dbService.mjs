@@ -40,22 +40,26 @@ export async function checkDocumentExists(filename, reprocessIncomplete = false)
             .eq('filename', filename);
             
         if (simpleData?.length) {
-            // If reprocessIncomplete is true and status is 'processing', allow reprocessing
+            // If document exists but is in 'processing' status and reprocessIncomplete is true, allow reprocessing
             if (reprocessIncomplete && simpleData[0].status === 'processing') {
                 console.log(`Found document in 'processing' status - will reprocess`);
                 return false;
             }
-            return true;
+            // Consider document as existing unless it's failed
+            return simpleData[0].status !== 'failed';
         }
     }
     
-    // If reprocessIncomplete is true and status is 'processing', allow reprocessing
-    if (data?.length && reprocessIncomplete && data[0].status === 'processing') {
-        console.log(`Found document in 'processing' status - will reprocess`);
-        return false;
+    // Same logic for full path matches
+    if (data?.length) {
+        if (reprocessIncomplete && data[0].status === 'processing') {
+            console.log(`Found document in 'processing' status - will reprocess`);
+            return false;
+        }
+        return data[0].status !== 'failed';
     }
     
-    return data && data.length > 0;
+    return false;
 }
 
 export async function getLastProcessedDocument() {

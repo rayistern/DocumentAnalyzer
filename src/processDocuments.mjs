@@ -35,7 +35,7 @@ async function processDocuments(options) {
                 const filename = path.basename(file);
                 
                 // Check if file exists in document_sources
-                const exists = await checkDocumentExists(filename);
+                const exists = await checkDocumentExists(filename, options.reprocessIncomplete);
                 if (exists) {
                     console.log(`Skipping ${filename} - already processed`);
                     continue;
@@ -81,6 +81,15 @@ async function processDocuments(options) {
                 }
             } catch (error) {
                 console.error(`Error processing ${file}:`, error.message);
+                // Save failed status
+                try {
+                    await saveAnalysis(text || '', 'failed', {
+                        filepath: filename,
+                        warnings: [`Processing failed: ${error.message}`]
+                    });
+                } catch (saveError) {
+                    console.error(`Error saving failed status: ${saveError.message}`);
+                }
             }
         }
         
@@ -100,6 +109,7 @@ program
     .description('Process documents from inputFiles directory')
     .option('-m, --maxChunkLength <number>', 'maximum length of each chunk', parseInt)
     .option('-o, --overview <text>', 'overview text to include in the prompt')
+    .option('-r, --reprocessIncomplete', 'reprocess documents that are in processing status')
     .action(async (options) => {
         options.maxChunkLength = options.maxChunkLength || 2000;
         await processDocuments(options);

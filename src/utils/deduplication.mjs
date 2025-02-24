@@ -28,6 +28,7 @@ async function checkDocumentHashExists(contentHash) {
         .from('documents')
         .select('id')
         .eq('content_hash', contentHash)
+        .neq('status', 'failed')  // Exclude failed documents from hash check
         .single();
 
     if (error) {
