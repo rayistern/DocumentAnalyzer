@@ -999,4 +999,10 @@ export async function batchProcessFullMetadata(documentIds) {
                     }
                 }
             } catch (error) {
-                console.error(`
+                console.error(`Error in metadata generation for document ${docId}:`, error);
+            }
+        } catch (error) {
+            console.error(`Error processing document ${docId}:`, error);
+        }
+    }
+}

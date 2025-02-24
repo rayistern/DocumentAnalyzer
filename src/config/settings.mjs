@@ -34,6 +34,8 @@ export const OPENAI_PROMPTS = {
                 - Page numbers and headers (e.g., "Page 1", "Chapter 1:")
                 - Divider lines (e.g., "----------")
                 - Headers and footers
+                - Footnotes, citations, and references
+                - Footnote numbers or reference markers within the body of the text (along with their punctuation)
                 - Version numbers or draft markings
                 - Any other non-content structural elements
 
