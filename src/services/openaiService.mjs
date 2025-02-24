@@ -478,69 +478,71 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         await saveCleanedDocument(document.id, finalCleanedText, content, OPENAI_SETTINGS.model);
 
         // Get metadata for the cleaned text
-        console.log('\nGetting metadata for cleaned text...');
-        try {
-            const metadataResponse = await openai.chat.completions.create(
-                createApiOptions(getModelForOperation('fullMetadata'), [
-                    OPENAI_PROMPTS.cleanAndChunk.fullMetadata(),
-                    {
-                        role: "user",
-                        content: cleanedText
-                    }
-                ])
-            );
-            console.log('Full metadata operation used model:', metadataResponse.model);
-            
-            // Store raw response first
-            const { error: rawError } = await supabase
-                .from('documents')
-                .update({ 
-                    raw_llm_response: metadataResponse.choices[0].message.content,
-                    updated_at: new Date().toISOString()
-                })
-                .eq('id', document.id);
-
-            if (rawError) {
-                console.error('Error storing raw response:', rawError);
-            }
-            
-            // Continue with normal metadata processing
-            const cleanedResponse = removeMarkdownFormatting(metadataResponse.choices[0].message.content);
-            console.log('Attempting to parse metadata JSON:', cleanedResponse);
-            const metadata = parseJsonResponse(cleanedResponse);
-            
-            // Store processed metadata
-            const { error: metadataError } = await supabase
-                .from('documents')
-                .update({ 
-                    long_description: metadata.longDescription,
-                    keywords: metadata.keywords,
-                    questions_answered: metadata.questionsAnswered,
-                    updated_at: new Date().toISOString()
-                })
-                .eq('id', document.id);
-
-            if (metadataError) {
-                console.error('Error saving metadata:', metadataError);
-            } else {
-                // Update document source status to processed
-                const { error: statusError } = await supabase
-                    .from('document_sources')
+        if (!skipMetadata) {
+            console.log('\nGetting metadata for cleaned text...');
+            try {
+                const metadataResponse = await openai.chat.completions.create(
+                    createApiOptions(getModelForOperation('fullMetadata'), [
+                        OPENAI_PROMPTS.cleanAndChunk.fullMetadata(),
+                        {
+                            role: "user",
+                            content: cleanedText
+                        }
+                    ])
+                );
+                console.log('Full metadata operation used model:', metadataResponse.model);
+                
+                // Store raw response first
+                const { error: rawError } = await supabase
+                    .from('documents')
                     .update({ 
-                        status: 'processed',
+                        raw_llm_response: metadataResponse.choices[0].message.content,
                         updated_at: new Date().toISOString()
                     })
-                    .eq('id', document.document_source_id);
+                    .eq('id', document.id);
 
-                if (statusError) {
-                    console.error(`Error updating status for document ${document.id}:`, statusError);
-                } else {
-                    console.log('Saved metadata to document');
+                if (rawError) {
+                    console.error('Error storing raw response:', rawError);
                 }
+                
+                // Continue with normal metadata processing
+                const cleanedResponse = removeMarkdownFormatting(metadataResponse.choices[0].message.content);
+                console.log('Attempting to parse metadata JSON:', cleanedResponse);
+                const metadata = parseJsonResponse(cleanedResponse);
+                
+                // Store processed metadata
+                const { error: metadataError } = await supabase
+                    .from('documents')
+                    .update({ 
+                        long_description: metadata.longDescription,
+                        keywords: metadata.keywords,
+                        questions_answered: metadata.questionsAnswered,
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', document.id);
+
+                if (metadataError) {
+                    console.error('Error saving metadata:', metadataError);
+                } else {
+                    // Update document source status to processed
+                    const { error: statusError } = await supabase
+                        .from('document_sources')
+                        .update({ 
+                            status: 'processed',
+                            updated_at: new Date().toISOString()
+                        })
+                        .eq('id', document.document_source_id);
+
+                    if (statusError) {
+                        console.error(`Error updating status for document ${document.id}:`, statusError);
+                    } else {
+                        console.log('Saved metadata to document');
+                    }
+                }
+            } catch (error) {
+                console.error('Error in metadata generation/saving:', error);
+                console.error('Full error:', error.stack);
             }
-        } catch (error) {
-            console.error('Error in metadata generation/saving:', error);
-            console.error('Full error:', error.stack);
         }
 
         // Send cleaned text to LLM for semantic chunking
