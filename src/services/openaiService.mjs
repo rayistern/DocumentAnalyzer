@@ -501,40 +501,16 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
     for (let i = 0; i < preChunks.length; i++) {
         console.log(`\nProcessing pre-chunk ${i + 1}/${preChunks.length}...`);
         
-        // Combine remainder with current chunk
         const chunk = preChunks[i];
-        const combinedText = remainderText + chunk.text;
-        console.log(`Combined text length: ${combinedText.length} (${remainderText.length} from remainder)`);
 
-        // Save this pre-chunk to database (after combining with remainder)
-        const { error: prechunkError } = await supabase
-            .from('prechunks')
-            .insert({
-                document_id: document.id,
-                chunk_index: i,
-                text: chunk.text,
-                start_position: chunk.startPosition,
-                end_position: chunk.endPosition,
-                is_complete: Boolean(chunk.isComplete),
-                created_at: new Date().toISOString(),
-                remainder_text: remainderText,
-                remainder_length: remainderText.length
-            });
-
-        if (prechunkError) {
-            console.error(`Error saving pre-chunk ${i + 1}:`, prechunkError);
-        } else {
-            console.log(`Saved pre-chunk ${i + 1} to database`);
-        }
-
-        // Step 1: Clean the text chunk using LLM
+        // Step 1: Clean just the new chunk text using LLM
         console.log('Cleaning text chunk...');
         const cleanResponse = await openai.chat.completions.create(
             createApiOptions(getModelForOperation('clean'), [
-                OPENAI_PROMPTS.cleanAndChunk.clean('', true), // Always set isIncomplete=true for continuations
+                OPENAI_PROMPTS.cleanAndChunk.clean('', true),
                 {
                     role: "user",
-                    content: combinedText
+                    content: chunk.text
                 }
             ])
         );
@@ -546,7 +522,6 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
             cleanResult = parseJsonResponse(cleanResponse.choices[0].message.content);
         } catch (parseError) {
             console.warn('Failed to parse LLM response as JSON, storing raw response:', parseError.message);
-            // Store the raw response and continue
             const { error: rawError } = await supabase
                 .from('documents')
                 .update({ 
@@ -560,26 +535,26 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
             if (rawError) {
                 console.error('Error storing raw response:', rawError);
             }
-            // Return empty result to continue processing
             cleanResult = { textToRemove: [] };
         }
         console.log('Parsed clean result');
         
         // Adjust positions of textToRemove based on chunk start position
-        // This is needed because the LLM returns positions relative to the text it sees,
-        // but we need positions relative to the original document
         if (cleanResult.textToRemove) {
             cleanResult.textToRemove = cleanResult.textToRemove.map(item => ({
                 ...item,
-                startPosition: item.startPosition + chunk.startPosition - remainderText.length - 1,
-                endPosition: item.endPosition + chunk.startPosition - remainderText.length - 1
+                startPosition: item.startPosition + chunk.startPosition - 1,
+                endPosition: item.endPosition + chunk.startPosition - 1
             }));
             allTextToRemove = [...allTextToRemove, ...cleanResult.textToRemove];
         }
 
-        // Clean the combined text by removing unwanted text segments
-        const cleanedText = cleanText(combinedText, cleanResult.textToRemove);
-        let finalChunkText = cleanedText;
+        // Clean just the new chunk text
+        const cleanedChunkText = cleanText(chunk.text, cleanResult.textToRemove);
+        
+        // Now combine cleaned chunk with remainder (which is already clean)
+        const combinedText = remainderText + cleanedChunkText;
+        let finalChunkText = combinedText;
         
         // If this is the first chunk and we have previous text, prepend it
         if (i === 0 && previousText) {
@@ -607,7 +582,7 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                         OPENAI_PROMPTS.cleanAndChunk.fullMetadata(),
                         {
                             role: "user",
-                            content: cleanedText
+                            content: combinedText
                         }
                     ])
                 );
@@ -733,7 +708,7 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
             console.log(`End position: ${chunk.endPosition}`);
             console.log(`Remainder length: ${remainderText.length}`);
             console.log(`Combined text length: ${combinedText.length}`);
-            console.log(`Cleaned text length: ${cleanedText.length}`);
+            console.log(`Cleaned text length: ${cleanedChunkText.length}`);
 
             let cumulativeOffset = 0;  // Track character position differences between what LLM sees vs actual text
             chunkResult.chunks = chunkResult.chunks.map((c, index) => {
