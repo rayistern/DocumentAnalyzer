@@ -52,6 +52,10 @@ async function processDocuments(options) {
                 
                 // Calculate hash and check for duplicate content immediately
                 const contentHash = calculateContentHash(text);
+                console.log('\n=== PROCESSING DOCUMENT ===');
+                console.log('File:', filename);
+                console.log('Content hash:', contentHash);
+
                 const { isDuplicate, documentId } = await checkDuplicateDocument(text);
                 if (isDuplicate) {
                     console.log(`Found duplicate content (Document ID: ${documentId})`);
@@ -101,7 +105,8 @@ async function processDocuments(options) {
                 // When saving analysis, use the skipMetadata option:
                 await saveAnalysis(text, options.skipMetadata ? 'cleanAndChunk' : 'fullMetadata_only', {
                     filepath: filename,
-                    warnings: result.warnings || []
+                    warnings: result.warnings || [],
+                    content_hash: contentHash
                 });
             } catch (error) {
                 console.error(`Error processing ${file}:`, error.message);
@@ -109,7 +114,8 @@ async function processDocuments(options) {
                 try {
                     await saveAnalysis(text || '', 'failed', {
                         filepath: filename,
-                        warnings: [`Processing failed: ${error.message}`]
+                        warnings: [`Processing failed: ${error.message}`],
+                        content_hash: contentHash
                     });
                 } catch (saveError) {
                     console.error(`Error saving failed status: ${saveError.message}`);
