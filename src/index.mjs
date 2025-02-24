@@ -84,6 +84,7 @@ program
     .action(async (pattern, options) => {
         try {
             const files = await glob(pattern);
+            files.sort(); // Sort files in ascending order
             console.log(`Found ${files.length} files matching pattern`);
 
             // If continuing from last processed, get the last document

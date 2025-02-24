@@ -44,6 +44,8 @@ export const OPENAI_PROMPTS = {
                 2. Its start and end positions
                 3. 10 characters of context before and after (if available)
 
+                Do not remove parentheticals, or any actual text from within the main body of the text.
+
                 Return a valid JSON in the following exact format (no preface):
                 {
                     "textToRemove": [
