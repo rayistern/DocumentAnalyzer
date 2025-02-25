@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, varchar, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, varchar, jsonb, integer } from "drizzle-orm/pg-core";
 
 export const documents = pgTable('documents', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -27,7 +27,8 @@ export const documentSources = pgTable('document_sources', {
   status: text('status').notNull(),
   cleanedContent: text('cleaned_content'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow()
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  groupNumber: text('group_number')
 });
 
 export const chunks = pgTable('chunks', {

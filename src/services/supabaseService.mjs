@@ -24,7 +24,8 @@ export async function saveAnalysis(content, type, metadata = {}) {
                 .insert({
                     filename: metadata.filepath,
                     original_content: content,
-                    status: type === 'skipped_duplicate' ? 'skipped' : type
+                    status: type === 'skipped_duplicate' ? 'skipped' : type,
+                    group_number: metadata.groupNumber
                 })
                 .select()
                 .single();

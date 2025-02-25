@@ -40,35 +40,35 @@ function getModelForOperation(operation) {
     return OPENAI_SETTINGS.modelConfig.operations[operation] || OPENAI_SETTINGS.model;
 }
 
-export async function processFile(content, type, filepath, maxChunkLength = OPENAI_SETTINGS.defaultMaxChunkLength, overview = '', skipMetadata = false, isContinuation = false, contentHash = null) {
+export async function processFile(content, type, filename, maxChunkLength = 2000, overview = '', skipMetadata = false, isContinuation = false, groupNumber = null) {
     try {
+        // Check for duplicate content
+        const { isDuplicate, documentId } = await checkDuplicateDocument(content, groupNumber);
+        if (isDuplicate) {
+            console.log('Duplicate content detected, skipping processing');
+            return { isDuplicate: true, documentId };
+        }
+
         // Calculate hash first
-        contentHash = calculateContentHash(content);
+        const contentHash = calculateContentHash(content);
 
         console.log('\n=== Processing File ===');
         console.log('Type:', type);
-        console.log('Filepath:', filepath);
+        console.log('Filepath:', filename);
         console.log('Content Hash:', contentHash);
         console.log('Content Length:', content?.length || 0);
         console.log('=====================\n');
-
-        // Check for duplicates
-        const { isDuplicate, documentId } = await checkDuplicateDocument(content);
-        if (isDuplicate) {
-            console.log(`Found duplicate document with ID: ${documentId}`);
-            return { isDuplicate: true, documentId };
-        }
 
         switch (type) {
             case 'sentiment':
                 return await analyzeSentiment(content);
             case 'chunk':
-                return await createChunks(content, maxChunkLength, filepath);
+                return await createChunks(content, maxChunkLength, filename);
             case 'cleanAndChunk':
-                return await cleanAndChunkDocument(content, maxChunkLength, filepath, overview, skipMetadata, isContinuation, contentHash);
+                return await cleanAndChunkDocument(content, maxChunkLength, filename, overview, skipMetadata, isContinuation, contentHash);
             case 'fullMetadata_only':
                 // Save initial document
-                const document = await saveAnalysis(content, 'fullMetadata_only', { filepath });
+                const document = await saveAnalysis(content, 'fullMetadata_only', { filename });
                 
                 // Process metadata
                 const metadataResponse = await openai.chat.completions.create(

@@ -9,6 +9,7 @@ import { glob } from 'glob';
 import path from 'path';
 import { convertToText } from './utils/documentConverter.mjs';
 import { checkDocumentExists, getLastProcessedDocument } from './services/dbService.mjs';
+import { saveAnalysis } from './services/supabaseService.mjs';
 
 dotenv.config();
 
@@ -82,6 +83,7 @@ program
     .option('-r, --reprocess-incomplete', 'reprocess documents that are in processing status')
     .option('--skipMetadata', 'skip the fullMetadata processing step')
     .option('--continuation', 'treat this document as a continuation of the previous one')
+    .option('-g, --group <name>', 'group name for the documents')
     .action(async (pattern, options) => {
         try {
             const files = await glob(pattern);
@@ -119,9 +121,9 @@ program
                     }
                     
                     // Check if file exists in document_sources
-                    const exists = await checkDocumentExists(filename, options.reprocessIncomplete);
+                    const exists = await checkDocumentExists(filename, options.reprocessIncomplete, options.group);
                     if (exists) {
-                        console.log(`Skipping ${filename} - already processed`);
+                        console.log(`Skipping ${filename} - already processed in group ${options.group}`);
                         continue;
                     }
 
@@ -138,7 +140,8 @@ program
                         parseInt(options.maxChunkLength),
                         options.overview,
                         options.skipMetadata,
-                        options.continuation
+                        options.continuation,
+                        options.group
                     );
 
                     console.log(`Successfully processed ${filename}`);
@@ -146,6 +149,13 @@ program
                     if (result.warnings?.length > 0) {
                         console.log('Warnings:', result.warnings);
                     }
+
+                    // When saving analysis, pass the group number
+                    await saveAnalysis(text, options.skipMetadata ? 'cleanAndChunk' : 'fullMetadata_only', {
+                        filepath: filename,
+                        warnings: result.warnings || [],
+                        groupNumber: options.group
+                    });
                 } catch (error) {
                     console.error(`Error processing ${file}:`, error.message);
                 }

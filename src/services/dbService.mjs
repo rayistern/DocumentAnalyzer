@@ -17,27 +17,41 @@ async function debugCheckFilename(filename) {
     console.log('Debug - Found these similar filenames in DB:', data);
 }
 
-export async function checkDocumentExists(filename, reprocessIncomplete = false) {
+export async function checkDocumentExists(filename, reprocessIncomplete = false, groupNumber = null) {
     // Construct the full path with backslashes
     const fullPath = `G:\\My Drive\\Igros\\${filename}`;
     console.log('Checking document with full path:', fullPath);
     
-    const { data, error } = await supabase
+    let query = supabase
         .from('document_sources')
-        .select('id, filename, status')
-        .eq('filename', fullPath);
+        .select('id, filename, status');
+
+    // If group number is provided, only check within that group
+    if (groupNumber !== null) {
+        query = query.eq('group_number', groupNumber);
+    }
+    query = query.eq('filename', fullPath);
+    
+    const { data, error } = await query;
     
     if (error) {
         console.error('Error checking document:', error);
         return false;
     }
     
-    // Also check without path
+    // Also check without path if not found with full path
     if (!data?.length) {
-        const { data: simpleData, error: simpleError } = await supabase
+        let simpleQuery = supabase
             .from('document_sources')
-            .select('id, filename, status')
-            .eq('filename', filename);
+            .select('id, filename, status');
+            
+        // Apply group filter here too
+        if (groupNumber !== null) {
+            simpleQuery = simpleQuery.eq('group_number', groupNumber);
+        }
+        simpleQuery = simpleQuery.eq('filename', filename);
+        
+        const { data: simpleData, error: simpleError } = await simpleQuery;
             
         if (simpleData?.length) {
             // If document exists but is in 'processing' status and reprocessIncomplete is true, allow reprocessing
