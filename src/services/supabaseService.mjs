@@ -54,8 +54,7 @@ export async function saveAnalysis(content, type, metadata = {}) {
 
             if (docError) throw docError;
             document = docData;
-
-        } else if (type === 'chunk' && metadata.document_source_id) {
+        } else if (metadata.document_source_id) {
             // For chunk processing, use existing document source id
             documentSourceId = metadata.document_source_id;
             document = metadata.document;
