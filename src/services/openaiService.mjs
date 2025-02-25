@@ -7,6 +7,8 @@ import dotenv from 'dotenv'
 import { supabase } from './supabaseService.mjs';
 import { retryWithFallback, validateGap } from './errorHandlingService.mjs';
 import { parseJsonResponse } from '../utils/jsonUtils.mjs';
+import { calculateContentHash } from '../utils/deduplication.mjs';
+import { checkDuplicateDocument } from '../utils/deduplication.mjs';
 
 dotenv.config()
 
@@ -40,12 +42,22 @@ function getModelForOperation(operation) {
 
 export async function processFile(content, type, filepath, maxChunkLength = OPENAI_SETTINGS.defaultMaxChunkLength, overview = '', skipMetadata = false, isContinuation = false, contentHash = null) {
     try {
+        // Calculate hash first
+        contentHash = calculateContentHash(content);
+
         console.log('\n=== Processing File ===');
         console.log('Type:', type);
         console.log('Filepath:', filepath);
         console.log('Content Hash:', contentHash);
         console.log('Content Length:', content?.length || 0);
         console.log('=====================\n');
+
+        // Check for duplicates
+        const { isDuplicate, documentId } = await checkDuplicateDocument(content);
+        if (isDuplicate) {
+            console.log(`Found duplicate document with ID: ${documentId}`);
+            return { isDuplicate: true, documentId };
+        }
 
         switch (type) {
             case 'sentiment':
@@ -56,21 +68,6 @@ export async function processFile(content, type, filepath, maxChunkLength = OPEN
                 return await cleanAndChunkDocument(content, maxChunkLength, filepath, overview, skipMetadata, isContinuation, contentHash);
             case 'fullMetadata_only':
                 // Save initial document
-                console.log('Content hash for deduplication:', contentHash);
-                
-                // Check for existing document with this hash
-                const { data: existingDoc, error: hashSearchError } = await supabase
-                    .from('documents')
-                    .select('id, filepath')
-                    .eq('content_hash', contentHash)
-                    .single();
-                    
-                if (hashSearchError) {
-                    console.log('No existing document found with hash:', contentHash);
-                } else {
-                    console.log('Found existing document:', existingDoc);
-                }
-                
                 const document = await saveAnalysis(content, 'fullMetadata_only', { filepath });
                 
                 // Process metadata
@@ -455,22 +452,6 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                 }
             }
         }
-    }
-    
-    // Save initial document with the raw content hash
-    console.log('Content hash for deduplication:', contentHash);
-    
-    // Check for existing document with this hash
-    const { data: existingDoc, error: hashSearchError } = await supabase
-        .from('documents')
-        .select('id, filepath')
-        .eq('content_hash', contentHash)
-        .single();
-        
-    if (hashSearchError) {
-        console.log('No existing document found with hash:', contentHash);
-    } else {
-        console.log('Found existing document:', existingDoc);
     }
     
     const document = await saveAnalysis(content, skipMetadata ? 'cleanAndChunk' : 'fullMetadata_only', { 

@@ -28,17 +28,18 @@ async function checkDocumentHashExists(contentHash) {
         .from('documents')
         .select('id')
         .eq('content_hash', contentHash)
-        .neq('status', 'failed')  // Exclude failed documents from hash check
-        .single();
+        .neq('status', 'failed');  // Exclude failed documents from hash check
 
     if (error) {
-        if (error.code === 'PGRST116') { // No rows returned
-            return { exists: false };
-        }
         throw error;
     }
 
-    return { exists: true, documentId: data.id };
+    if (!data || data.length === 0) {
+        return { exists: false };
+    }
+
+    // Return the first matching document ID
+    return { exists: true, documentId: data[0].id };
 }
 
 /**
