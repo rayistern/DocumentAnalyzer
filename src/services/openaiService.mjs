@@ -96,6 +96,10 @@ export async function processFile(content, type, filepath, maxChunkLength = OPEN
     }
 }
 
+function stripDiacritics(text) {
+    return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
 function cleanText(text, textToRemove) {
     // Normalize quotation marks in the input text
     const normalizeQuotes = (str) => str.replace(/[""]/g, '"').replace(/['']/g, "'");
@@ -105,8 +109,8 @@ function cleanText(text, textToRemove) {
 
     if (textToRemove && Array.isArray(textToRemove)) {
         textToRemove.forEach(item => {
-            // Normalize the text to remove
-            const normalizedItemText = normalizeQuotes(item.text);
+            // Normalize the text to remove and strip diacritics
+            const normalizedItemText = stripDiacritics(normalizeQuotes(item.text));
             
             // IMPORTANT: First try the exact position the LLM gave us
             // Only fall back to searching if that fails
@@ -116,14 +120,14 @@ function cleanText(text, textToRemove) {
             const adjustedStart = item.startPosition - 1 - offset;
             const adjustedEnd = item.endPosition - offset;
 
-            // Try exact position first
-            const exactText = cleanedText.substring(adjustedStart, adjustedEnd);
+            // Try exact position first with diacritic-stripped comparison
+            const exactText = stripDiacritics(cleanedText.substring(adjustedStart, adjustedEnd));
             if (exactText === normalizedItemText) {
                 found = true;
                 cleanedText = cleanedText.substring(0, adjustedStart) + 
                             cleanedText.substring(adjustedEnd);
-                offset += normalizedItemText.length;
-                console.log(`Removed text at exact position: "${normalizedItemText}"`);
+                offset += item.endPosition - item.startPosition;
+                console.log(`Removed text at exact position: "${item.text}"`);
             }
 
             // If exact position fails, search near the position
@@ -131,49 +135,55 @@ function cleanText(text, textToRemove) {
                 const searchStart = Math.max(0, adjustedStart - tolerance);
                 const searchEnd = Math.min(cleanedText.length, adjustedEnd + tolerance);
                 const searchArea = cleanedText.substring(searchStart, searchEnd);
+                const strippedSearchArea = stripDiacritics(searchArea);
                 
-                const textPos = searchArea.indexOf(normalizedItemText);
+                const textPos = strippedSearchArea.indexOf(normalizedItemText);
                 if (textPos !== -1) {
                     found = true;
+                    const originalLength = searchArea.substring(textPos, textPos + item.text.length).length;
                     cleanedText = cleanedText.substring(0, searchStart + textPos) + 
-                                cleanedText.substring(searchStart + textPos + normalizedItemText.length);
-                    offset += normalizedItemText.length;
-                    console.log(`Removed text by position-guided search: "${normalizedItemText}"`);
+                                cleanedText.substring(searchStart + textPos + originalLength);
+                    offset += originalLength;
+                    console.log(`Removed text by position-guided search: "${item.text}"`);
                 }
             }
 
             // If position-based approaches fail, try context matching
             if (!found && item.contextBefore && item.contextAfter) {
-                const pattern = escapeRegExp(item.contextBefore + item.text + item.contextAfter);
-                const match = cleanedText.match(new RegExp(pattern));
+                const pattern = escapeRegExp(stripDiacritics(item.contextBefore + item.text + item.contextAfter));
+                const strippedCleanedText = stripDiacritics(cleanedText);
+                const match = strippedCleanedText.match(new RegExp(pattern));
                 if (match) {
                     found = true;
-                    const matchStart = match.index + item.contextBefore.length;
+                    const matchStart = match.index + stripDiacritics(item.contextBefore).length;
+                    const originalLength = cleanedText.substring(matchStart, matchStart + item.text.length).length;
                     cleanedText = cleanedText.substring(0, matchStart) + 
-                                cleanedText.substring(matchStart + item.text.length);
-                    offset += item.text.length;
+                                cleanedText.substring(matchStart + originalLength);
+                    offset += originalLength;
                     console.log(`Removed text by context match: "${item.text}"`);
                 } else {
                     // Try with just before or after context
-                    const beforePattern = escapeRegExp(item.contextBefore + item.text);
-                    const afterPattern = escapeRegExp(item.text + item.contextAfter);
+                    const beforePattern = escapeRegExp(stripDiacritics(item.contextBefore + item.text));
+                    const afterPattern = escapeRegExp(stripDiacritics(item.text + item.contextAfter));
                     
-                    const beforeMatch = cleanedText.match(new RegExp(beforePattern));
-                    const afterMatch = cleanedText.match(new RegExp(afterPattern));
+                    const beforeMatch = strippedCleanedText.match(new RegExp(beforePattern));
+                    const afterMatch = strippedCleanedText.match(new RegExp(afterPattern));
                     
                     if (beforeMatch) {
                         found = true;
-                        const matchStart = beforeMatch.index + item.contextBefore.length;
+                        const matchStart = beforeMatch.index + stripDiacritics(item.contextBefore).length;
+                        const originalLength = cleanedText.substring(matchStart, matchStart + item.text.length).length;
                         cleanedText = cleanedText.substring(0, matchStart) + 
-                                    cleanedText.substring(matchStart + item.text.length);
-                        offset += item.text.length;
+                                    cleanedText.substring(matchStart + originalLength);
+                        offset += originalLength;
                         console.log(`Removed text by before-context match: "${item.text}"`);
                     } else if (afterMatch) {
                         found = true;
                         const matchStart = afterMatch.index;
+                        const originalLength = cleanedText.substring(matchStart, matchStart + item.text.length).length;
                         cleanedText = cleanedText.substring(0, matchStart) + 
-                                    cleanedText.substring(matchStart + item.text.length);
-                        offset += item.text.length;
+                                    cleanedText.substring(matchStart + originalLength);
+                        offset += originalLength;
                         console.log(`Removed text by after-context match: "${item.text}"`);
                     }
                 }
@@ -181,12 +191,14 @@ function cleanText(text, textToRemove) {
 
             // Last resort: if all else fails and text appears exactly once
             if (!found) {
-                const matches = cleanedText.match(new RegExp(escapeRegExp(item.text), 'g'));
+                const strippedCleanedText = stripDiacritics(cleanedText);
+                const matches = strippedCleanedText.match(new RegExp(escapeRegExp(normalizedItemText), 'g'));
                 if (matches && matches.length === 1) {
-                    const matchStart = cleanedText.indexOf(item.text);
+                    const matchStart = strippedCleanedText.indexOf(normalizedItemText);
+                    const originalLength = cleanedText.substring(matchStart, matchStart + item.text.length).length;
                     cleanedText = cleanedText.substring(0, matchStart) + 
-                                cleanedText.substring(matchStart + item.text.length);
-                    offset += item.text.length;
+                                cleanedText.substring(matchStart + originalLength);
+                    offset += originalLength;
                     console.log(`Removed text by single exact match: "${item.text}"`);
                 } else {
                     console.warn(`Warning: Could not find unique text "${item.text}" at position ${item.startPosition}-${item.endPosition} or with context`);
@@ -532,12 +544,18 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         const cleanedText = cleanText(combinedText, cleanResult.textToRemove);
 
         // Then combine with previous text if needed (only on first iteration)
-        finalCleanedText = cleanedText;
+        let finalCleanedText = cleanedText;
 
         // If this is the first chunk and we have previous text, prepend it before chunking
         if (i === 0 && previousText) {
             finalCleanedText = previousText + '\n' + cleanedText;
             console.log('Prepended previous document context');
+        }
+
+        // If we have remainder text from previous iteration, prepend it
+        if (remainderText) {
+            finalCleanedText = remainderText + '\n' + finalCleanedText;
+            console.log('Prepended remainder text from previous iteration');
         }
 
         totalEffectiveLength = finalCleanedText.length;  // Update after cleaning and combining
