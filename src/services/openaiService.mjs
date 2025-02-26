@@ -459,7 +459,6 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
     
     // If this is a continuation, get the last chunk or remainder from previous document
     let previousText = '';
-    let totalEffectiveLength = 0;  // Initialize here
     
     if (isContinuation) {
         console.log('Getting previous document context...');
@@ -620,8 +619,6 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
             finalCleanedText = remainderText + '\n' + finalCleanedText;
             console.log('Prepended remainder text from previous iteration');
         }
-
-        totalEffectiveLength = finalCleanedText.length;  // Update after cleaning and combining
 
         // Send finalCleanedText to LLM for chunking
         console.log('\nText being sent to LLM for chunking:');
@@ -978,7 +975,6 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
     // Handle final remainder if any
     if (remainderText.trim()) {
         console.log(`Processing final remainder of length ${remainderText.length}`);
-        totalEffectiveLength += remainderText.length;  // Add remainder to total length
         cleanedChunks.push({
             startIndex: content.length - remainderText.length + 1,
             endIndex: content.length,
@@ -988,7 +984,7 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         });
     }
 
-    const warnings = validateChunks(cleanedChunks, totalEffectiveLength, finalCleanedText.length);
+    const warnings = validateChunks(cleanedChunks, finalCleanedText.length, finalCleanedText.length);
     console.log('Validation warnings:', warnings);
 
     const result = {
