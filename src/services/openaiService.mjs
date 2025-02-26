@@ -100,6 +100,49 @@ function stripDiacritics(text) {
     return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
+function levenshteinDistance(str1, str2) {
+    const m = str1.length;
+    const n = str2.length;
+    const dp = Array(m + 1).fill().map(() => Array(n + 1).fill(0));
+
+    for (let i = 0; i <= m; i++) dp[i][0] = i;
+    for (let j = 0; j <= n; j++) dp[0][j] = j;
+
+    for (let i = 1; i <= m; i++) {
+        for (let j = 1; j <= n; j++) {
+            if (str1[i - 1] === str2[j - 1]) {
+                dp[i][j] = dp[i - 1][j - 1];
+            } else {
+                dp[i][j] = Math.min(
+                    dp[i - 1][j - 1] + 1,  // substitution
+                    dp[i - 1][j] + 1,      // deletion
+                    dp[i][j - 1] + 1       // insertion
+                );
+            }
+        }
+    }
+    return dp[m][n];
+}
+
+function isSimilarEnough(str1, str2, maxDistance = 2) {
+    // For very short strings, be more strict
+    if (str1.length < 5 || str2.length < 5) {
+        maxDistance = 1;
+    }
+    
+    // For longer strings, allow proportional difference
+    const longerLength = Math.max(str1.length, str2.length);
+    const maxProportionalDistance = Math.floor(longerLength * 0.2); // 20% difference allowed
+    const effectiveMaxDistance = Math.min(maxDistance, maxProportionalDistance);
+    
+    const distance = levenshteinDistance(str1, str2);
+    return {
+        distance,
+        isSimilar: distance <= effectiveMaxDistance,
+        similarity: 1 - (distance / longerLength)
+    };
+}
+
 function cleanText(text, textToRemove) {
     // Normalize quotation marks in the input text
     const normalizeQuotes = (str) => str.replace(/[""]/g, '"').replace(/['']/g, "'");
@@ -111,23 +154,23 @@ function cleanText(text, textToRemove) {
         textToRemove.forEach(item => {
             // Normalize the text to remove and strip diacritics
             const normalizedItemText = stripDiacritics(normalizeQuotes(item.text));
-            
-            // IMPORTANT: First try the exact position the LLM gave us
-            // Only fall back to searching if that fails
             let found = false;
 
             // Adjust positions based on how much text we've removed so far
             const adjustedStart = item.startPosition - 1 - offset;
             const adjustedEnd = item.endPosition - offset;
 
-            // Try exact position first with diacritic-stripped comparison
-            const exactText = stripDiacritics(cleanedText.substring(adjustedStart, adjustedEnd));
-            if (exactText === normalizedItemText) {
+            // Try exact position first with similarity check
+            const exactText = cleanedText.substring(adjustedStart, adjustedEnd);
+            const strippedExactText = stripDiacritics(exactText);
+            const exactSimilarity = isSimilarEnough(strippedExactText, normalizedItemText);
+            
+            if (exactSimilarity.isSimilar) {
                 found = true;
                 cleanedText = cleanedText.substring(0, adjustedStart) + 
                             cleanedText.substring(adjustedEnd);
                 offset += item.endPosition - item.startPosition;
-                console.log(`Removed text at exact position: "${item.text}"`);
+                console.log(`Removed text at exact position: "${item.text}" (similarity: ${exactSimilarity.similarity.toFixed(2)})`);
             }
 
             // If exact position fails, search near the position
@@ -135,16 +178,36 @@ function cleanText(text, textToRemove) {
                 const searchStart = Math.max(0, adjustedStart - tolerance);
                 const searchEnd = Math.min(cleanedText.length, adjustedEnd + tolerance);
                 const searchArea = cleanedText.substring(searchStart, searchEnd);
-                const strippedSearchArea = stripDiacritics(searchArea);
+                const words = searchArea.split(/\s+/);
                 
-                const textPos = strippedSearchArea.indexOf(normalizedItemText);
-                if (textPos !== -1) {
+                // Try to find most similar substring
+                let bestMatch = {
+                    similarity: 0,
+                    position: -1,
+                    length: 0
+                };
+
+                for (let i = 0; i < words.length; i++) {
+                    const candidateText = words.slice(i, i + 3).join(' '); // Try different word combinations
+                    const strippedCandidate = stripDiacritics(candidateText);
+                    const similarity = isSimilarEnough(strippedCandidate, normalizedItemText);
+                    
+                    if (similarity.isSimilar && similarity.similarity > bestMatch.similarity) {
+                        const startPos = searchArea.indexOf(candidateText);
+                        bestMatch = {
+                            similarity: similarity.similarity,
+                            position: startPos,
+                            length: candidateText.length
+                        };
+                    }
+                }
+
+                if (bestMatch.position !== -1) {
                     found = true;
-                    const originalLength = searchArea.substring(textPos, textPos + item.text.length).length;
-                    cleanedText = cleanedText.substring(0, searchStart + textPos) + 
-                                cleanedText.substring(searchStart + textPos + originalLength);
-                    offset += originalLength;
-                    console.log(`Removed text by position-guided search: "${item.text}"`);
+                    cleanedText = cleanedText.substring(0, searchStart + bestMatch.position) + 
+                                cleanedText.substring(searchStart + bestMatch.position + bestMatch.length);
+                    offset += bestMatch.length;
+                    console.log(`Removed text by similarity search: "${item.text}" (similarity: ${bestMatch.similarity.toFixed(2)})`);
                 }
             }
 
