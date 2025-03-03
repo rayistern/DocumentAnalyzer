@@ -1,6 +1,11 @@
 export function preChunkText(text, maxChunkSize = 1500) {
+    console.log(`\n=== Pre-Chunking Text ===`);
+    console.log(`Text length: ${text.length} characters`);
+    console.log(`Max chunk size: ${maxChunkSize} characters`);
+    
     // If text is shorter than maxChunkSize, return as single chunk
     if (text.length <= maxChunkSize) {
+        console.log(`Text fits in a single chunk, returning`);
         return [{
             text,
             isComplete: true,
@@ -14,9 +19,16 @@ export function preChunkText(text, maxChunkSize = 1500) {
 
     while (currentPosition < text.length) {
         const endPosition = Math.min(currentPosition + maxChunkSize, text.length);
+        const chunkText = text.slice(currentPosition, endPosition);
+        
+        console.log(`\nCreated pre-chunk ${chunks.length + 1}:`);
+        console.log(`- Start position: ${currentPosition + 1}`);
+        console.log(`- End position: ${endPosition}`);
+        console.log(`- Length: ${chunkText.length} characters`);
+        console.log(`- First 50 chars: "${chunkText.substring(0, 50)}..."`);
         
         chunks.push({
-            text: text.slice(currentPosition, endPosition),
+            text: chunkText,
             isComplete: endPosition === text.length,
             startPosition: currentPosition + 1,
             endPosition
@@ -25,6 +37,8 @@ export function preChunkText(text, maxChunkSize = 1500) {
         currentPosition = endPosition;
     }
 
+    console.log(`\nCreated ${chunks.length} pre-chunks in total`);
+    console.log(`=== End Pre-Chunking ===\n`);
     return chunks;
 }
 
