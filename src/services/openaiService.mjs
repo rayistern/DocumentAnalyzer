@@ -143,6 +143,21 @@ function isSimilarEnough(str1, str2, maxDistance = 2) {
     };
 }
 
+/**
+ * Removes specified text segments from the input text
+ * 
+ * This function is crucial for document cleaning. It takes the raw pre-chunk text
+ * and removes segments identified by the LLM as unnecessary (like headers, footers,
+ * footnotes, etc.).
+ * 
+ * IMPORTANT: This function should be applied ONLY to raw pre-chunk text, not to
+ * remainder text from previous iterations. Remainder text is already cleaned
+ * and should not be cleaned a second time.
+ * 
+ * @param {string} text - The raw pre-chunk text to clean
+ * @param {Array} textToRemove - Array of segments to remove with position info
+ * @returns {string} The cleaned text with specified segments removed
+ */
 function cleanText(text, textToRemove) {
     // Normalize quotation marks in the input text
     const normalizeQuotes = (str) => str.replace(/[""]/g, '"').replace(/['']/g, "'");
@@ -451,6 +466,18 @@ function findCompleteBoundary(text, position, word) {
     return position;
 }
 
+/**
+ * Main document processing function that cleans and chunks a document
+ * 
+ * @param {string} content - Raw document content
+ * @param {number} maxChunkLength - Maximum length for semantic chunks
+ * @param {string} filepath - Path to the original file (for reference)
+ * @param {string} overview - Optional document overview
+ * @param {boolean} skipMetadata - Whether to skip metadata generation
+ * @param {boolean} isContinuation - Whether this document continues from a previous one
+ * @param {string} contentHash - Optional content hash
+ * @returns {Object} Processing results including chunks and warnings
+ */
 async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview = '', skipMetadata = false, isContinuation = false, contentHash = null) {
     console.log('\n=== Starting Document Processing ===');
     console.log(`Total document length: ${content.length} characters`);
@@ -526,12 +553,19 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
     for (let i = 0; i < preChunks.length; i++) {
         console.log(`\nProcessing pre-chunk ${i + 1}/${preChunks.length}...`);
         
-        // Combine remainder with current chunk
+        /**
+         * CRITICAL STEP 1: Get the raw pre-chunk text
+         * 
+         * Each pre-chunk is a raw piece of text from the document that needs to be:
+         * 1. Cleaned first (to remove headers, footers, etc.)
+         * 2. Then combined with any remainder from previous iteration
+         */
         const chunk = preChunks[i];
-        const combinedText = remainderText + chunk.text;
-        console.log(`Combined text length: ${combinedText.length} (${remainderText.length} from remainder)`);
 
-        // Save this pre-chunk to database (after combining with remainder)
+        // Log current remainder before processing begins
+        console.log(`Current remainder before processing (${remainderText.length} chars): "${remainderText.slice(0, Math.min(30, remainderText.length))}${remainderText.length > 30 ? '...' : ''}"`);
+        
+        // Save this pre-chunk to database (before any processing)
         const { error: prechunkError } = await supabase
             .from('prechunks')
             .insert({
@@ -552,14 +586,23 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
             console.log(`Saved pre-chunk ${i + 1} to database`);
         }
 
-        // Step 1: Clean the text chunk using LLM
-        console.log('Cleaning text chunk...');
+        /**
+         * CRITICAL STEP 2: Clean the raw pre-chunk text
+         * 
+         * The cleaning step is applied ONLY to the raw pre-chunk text (chunk.text).
+         * Remainder text is NOT included in cleaning because it was already cleaned
+         * in a previous iteration.
+         * 
+         * The main purpose of cleaning is to remove headers, footers, footnotes, etc.
+         * We don't want to clean the remainder text twice.
+         */
+        console.log('Cleaning raw pre-chunk text...');
         const cleanResponse = await openai.chat.completions.create(
             createApiOptions(getModelForOperation('clean'), [
                 OPENAI_PROMPTS.cleanAndChunk.clean('', true), // Always set isIncomplete=true for continuations
                 {
                     role: "user",
-                    content: combinedText
+                    content: chunk.text
                 }
             ])
         );
@@ -590,41 +633,73 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         }
         console.log('Parsed clean result');
         
-        // Adjust positions of textToRemove based on chunk start position
-        // This is needed because the LLM returns positions relative to the text it sees,
-        // but we need positions relative to the original document
+        /**
+         * Adjust positions of textToRemove based on chunk start position
+         * 
+         * The LLM returns positions relative to the raw pre-chunk text it analyzed.
+         * We need to adjust these positions to be relative to the original document.
+         */
         if (cleanResult.textToRemove) {
-            cleanResult.textToRemove = cleanResult.textToRemove.map(item => ({
+            // Save the adjusted positions for document-level tracking
+            const adjustedTextToRemove = cleanResult.textToRemove.map(item => ({
                 ...item,
-                startPosition: item.startPosition + chunk.startPosition - remainderText.length - 1,
-                endPosition: item.endPosition + chunk.startPosition - remainderText.length - 1
+                startPosition: item.startPosition + chunk.startPosition - 1,
+                endPosition: item.endPosition + chunk.startPosition - 1
             }));
-            allTextToRemove = [...allTextToRemove, ...cleanResult.textToRemove];
+            allTextToRemove = [...allTextToRemove, ...adjustedTextToRemove];
+            
+            // For cleaning the current chunk, we need positions relative to the chunk text
+            // The LLM already returned positions relative to the chunk, so we use the original positions
+        }
+        
+        /**
+         * CRITICAL STEP 3: Process the clean result to get the cleaned pre-chunk text
+         */
+        let cleanedText = '';
+        
+        if (cleanResult.cleanedText) {
+            // If the LLM returned cleanedText directly, use it
+            cleanedText = cleanResult.cleanedText;
+        } else if (cleanResult.textToRemove && cleanResult.textToRemove.length > 0) {
+            // Apply the removal of identified problematic sections to get cleaned text
+            // Use the original textToRemove positions as they're already relative to the chunk
+            cleanedText = cleanText(chunk.text, cleanResult.textToRemove);
+        } else {
+            // If no textToRemove was identified, use the original text
+            cleanedText = chunk.text;
+        }
+        
+        /**
+         * CRITICAL STEP 4: Combine cleaned pre-chunk with remainder
+         * 
+         * Now that we have the cleaned pre-chunk text, we combine it with any
+         * remainder text from the previous iteration.
+         * 
+         * Note: The remainder text is already cleaned, so we don't clean it again.
+         * We simply prepend it to our freshly cleaned text.
+         */
+        console.log(`Cleaned pre-chunk text length: ${cleanedText.length} chars`);
+        
+        // Create the final cleaned text by prepending any remainder text to the cleaned pre-chunk text
+        finalCleanedText = remainderText + cleanedText;
+        
+        console.log(`Combined text (remainder + cleaned) length: ${finalCleanedText.length} chars`);
+
+        // Add previous document context if this is a continuation and we're on the first chunk
+        if (i === 0 && isContinuation && previousText) {
+            console.log('Adding previous document context...');
+            finalCleanedText = previousText + '\n\n' + finalCleanedText;
         }
 
-        // Clean the combined text by removing unwanted text segments
-        const cleanedText = cleanText(combinedText, cleanResult.textToRemove);
+        console.log(`Preparing to chunk with total text length: ${finalCleanedText.length}`);
 
-        // Then combine with previous text if needed (only on first iteration)
-        let finalCleanedText = cleanedText;
-
-        // If this is the first chunk and we have previous text, prepend it before chunking
-        if (i === 0 && previousText) {
-            finalCleanedText = previousText + '\n' + cleanedText;
-            console.log('Prepended previous document context');
-        }
-
-        // If we have remainder text from previous iteration, prepend it
-        if (remainderText) {
-            finalCleanedText = remainderText + '\n' + finalCleanedText;
-            console.log('Prepended remainder text from previous iteration');
-        }
-
-        // Send finalCleanedText to LLM for chunking
-        console.log('\nText being sent to LLM for chunking:');
-        console.log('----------------------------------------');
-        console.log(finalCleanedText);
-        console.log('----------------------------------------\n');
+        /**
+         * CRITICAL STEP 5: Send combined cleaned text to LLM for semantic chunking
+         * 
+         * Now we send the properly combined text (remainder + cleaned pre-chunk)
+         * to the LLM to get semantically meaningful chunks.
+         */
+        console.log('Sending text for semantic chunking...');
 
         const messages = [
             OPENAI_PROMPTS.cleanAndChunk.chunk(maxChunkLength, !chunk.isComplete),
@@ -684,7 +759,7 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
             console.log(`Start position: ${chunk.startPosition}`);
             console.log(`End position: ${chunk.endPosition}`);
             console.log(`Remainder length: ${remainderText.length}`);
-            console.log(`Combined text length: ${combinedText.length}`);
+            console.log(`Combined text length: ${finalCleanedText.length}`);
             console.log(`Cleaned text length: ${cleanedText.length}`);
             console.log(`Effective text length: ${finalCleanedText.length}`);  // Add this log
 
@@ -926,8 +1001,12 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                     return [...acc, chunk];
                 }, []);
 
-            // Get remainder text for next iteration
-            // This is text after the last chunk that will be combined with the next pre-chunk
+            /**
+             * CRITICAL: Get remainder text for next iteration
+             * 
+             * The remainder is the text after the last chunk's end index.
+             * This text will be prepended to the next pre-chunk to maintain continuity.
+             */
             const lastChunk = chunkResult.chunks[chunkResult.chunks.length - 1];
             remainderText = finalCleanedText.substring(lastChunk.endIndex);
             console.log(`\nRemainder info:`);

@@ -1,0 +1,123 @@
+# Document Analyzer Processing Flow
+
+## Overview
+
+The Document Analyzer processes large documents by splitting them into semantic chunks that preserve meaning while being small enough for efficient processing. This document explains the core processing flow, especially how documents are broken into chunks and how text spans across chunk boundaries.
+
+## Key Concepts
+
+### Pre-chunks
+- **Definition**: Initial, fixed-size divisions of the document used as a starting point
+- **Purpose**: Break large documents into manageable pieces for initial processing
+- **Size**: Controlled by `OPENAI_SETTINGS.preChunkSize` (typically 1500-4000 characters)
+
+### Semantic Chunks
+- **Definition**: Meaningful divisions of the text created by the LLM
+- **Purpose**: Ensure text is broken at logical boundaries rather than arbitrary positions
+- **Size**: Controlled by `maxChunkLength` parameter
+
+### Remainder Text
+- **Definition**: Text at the end of a pre-chunk that couldn't be included in a semantic chunk
+- **Purpose**: Carried forward to the next pre-chunk to maintain context continuity
+- **Flow**: End of one pre-chunk → Beginning of next pre-chunk
+- **Important**: Remainder text is already cleaned and should not be cleaned again
+
+## Processing Flow
+
+1. **Document Loading**
+   - Read document content from file
+   - Generate content hash for tracking
+
+2. **Pre-chunking**
+   - Divide document into fixed-size "pre-chunks"
+   - These serve as initial processing units
+
+3. **Pre-chunk Processing (for each pre-chunk)**
+   - **Cleaning the Pre-chunk**:
+     - Send raw pre-chunk text to LLM for cleaning (without remainder)
+     - LLM identifies text segments to remove (headers, footers, footnotes, etc.)
+     - Apply removal to get cleaned pre-chunk text
+     - **Important**: Cleaning is done ONLY on the raw pre-chunk, not on remainder text
+
+   - **Combining with Remainder**:
+     - Take the already-cleaned remainder text from the previous iteration
+     - Prepend it to the cleaned current pre-chunk
+     - This happens AFTER cleaning, as remainder text is already cleaned
+     - Result: `finalCleanedText = remainder + cleanedPreChunk`
+
+   - **Previous Document Context (optional)**:
+     - If this is the first pre-chunk and we have previous document context
+     - Prepend previous document text to the combined text
+     - Only applies to the first chunk in continuation mode
+
+   - **Semantic Chunking**:
+     - Send the combined (and fully cleaned) text to LLM for semantic chunking
+     - LLM divides text into logical chunks with start/end positions
+     - Adjust chunk boundaries to find exact word matches
+
+   - **Remainder Calculation**:
+     - Text after the last semantic chunk becomes the remainder for next iteration
+     - This remainder is already cleaned and won't be cleaned again
+     - It will be prepended to the next pre-chunk's cleaned text
+
+4. **Final Processing**
+   - Process any remaining text as a final chunk
+   - Validate all chunks for coverage and consistency
+   - Save chunks to database
+
+## Remainder Text Handling
+
+The remainder handling is crucial for maintaining document continuity:
+
+1. **Creation**: After chunking, text after the last chunk becomes remainder
+2. **Storage**: Stored in the `remainderText` variable
+3. **Utilization**: Prepended to the next pre-chunk's CLEANED text (not raw text)
+4. **Key Point**: Remainder text is already cleaned and should not be cleaned again
+
+## Continuity Across Documents
+
+When processing continues across multiple documents:
+
+1. **Previous Document Context**: 
+   - If `isContinuation` is true, system retrieves remainder from previous document
+   - This remainder is prepended to the first pre-chunk's cleaned text
+
+2. **Final Remainder**:
+   - Last remainder from final document is saved for potential continuation
+
+## Important Variables
+
+- `remainderText`: Stores cleaned text that needs to be carried over to next pre-chunk
+- `chunk.text`: Raw text of the current pre-chunk (before cleaning)
+- `cleanedText`: Pre-chunk text after cleaning (but before combining with remainder)
+- `finalCleanedText`: Fully prepared text sent to LLM for chunking (remainder + cleaned pre-chunk)
+
+## Critical Workflow Order
+
+1. Pre-chunk the document
+2. For each pre-chunk:
+   - Clean the raw pre-chunk (remove headers, footers, etc.)
+   - Prepend already-cleaned remainder from previous iteration
+   - Send combined text for semantic chunking
+   - Extract new remainder from after the last chunk
+
+## Common Issues
+
+- **Double Cleaning**: If remainder text is included in cleaning, it gets cleaned twice
+- **Missing Remainder**: Verify remainder is properly prepended after cleaning
+- **Text Position Mismatch**: Ensure positions are calculated correctly for cleaned text
+
+## Debugging Tips
+
+When troubleshooting chunking issues:
+
+1. Check if remainder text is correctly prepended to each pre-chunk
+2. Verify the cleaning process isn't accidentally removing remainder text
+3. Ensure chunk boundaries are properly calculated
+4. Check if the text sent to LLM matches expectations
+
+## Common Issues
+
+- **Missing Remainder**: Check if remainder is being correctly carried forward
+- **Text Removal Issues**: Verify if the cleaning process is removing important text
+- **Boundary Mismatches**: Ensure chunk boundaries align with semantic breaks 
