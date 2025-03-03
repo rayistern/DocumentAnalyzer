@@ -83,11 +83,19 @@ program
     .option('-r, --reprocess-incomplete', 'reprocess documents that are in processing status')
     .option('--skipMetadata', 'skip the fullMetadata processing step')
     .option('--continuation', 'treat this document as a continuation of the previous one')
-    .option('-g, --group <name>', 'group name for the documents')
+    .option('-g, --group <n>', 'group name for the documents')
+    .option('--reverse', 'process files in reverse order')
     .action(async (pattern, options) => {
         try {
             const files = await glob(pattern);
-            files.sort(); // Sort files in ascending order
+            
+            // Sort files based on the reverse flag
+            if (options.reverse) {
+                files.sort().reverse(); // Sort and then reverse for descending order
+                console.log('Processing files in reverse order');
+            } else {
+                files.sort(); // Sort files in ascending order
+            }
             console.log(`Found ${files.length} files matching pattern`);
 
             // If continuing from last processed, get the last document
@@ -170,9 +178,17 @@ program
     .command('process-metadata')
     .description('Process fullMetadata for documents')
     .argument('<ids>', 'comma-separated list of document IDs')
-    .action(async (ids) => {
+    .option('--reverse', 'process document IDs in reverse order')
+    .action(async (ids, options) => {
         try {
-            const documentIds = ids.split(',').map(id => parseInt(id.trim()));
+            let documentIds = ids.split(',').map(id => parseInt(id.trim()));
+            
+            // Sort document IDs based on the reverse flag
+            if (options.reverse) {
+                documentIds.reverse();
+                console.log('Processing document IDs in reverse order');
+            }
+            
             await batchProcessFullMetadata(documentIds);
             console.log('Metadata processing complete');
         } catch (error) {
