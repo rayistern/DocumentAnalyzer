@@ -33,8 +33,8 @@ export async function saveAnalysis(content, type, metadata = {}) {
             if (sourceError) throw sourceError;
             documentSourceId = sourceData.id;
 
-            // Calculate content hash
-            const contentHash = calculateContentHash(content);
+            // Calculate content hash if not provided
+            const contentHash = metadata.content_hash || calculateContentHash(content);
 
             // Save initial document
             const { data: docData, error: docError } = await supabase
@@ -62,8 +62,10 @@ export async function saveAnalysis(content, type, metadata = {}) {
             throw new Error('Invalid operation type or missing document source id');
         }
 
-        // For chunks, save with source reference
-        if (metadata.chunks && !metadata.skipChunkSave) {
+        // Process and save chunks if present
+        if (metadata.chunks && metadata.chunks.length > 0) {
+            console.log(`Saving ${metadata.chunks.length} chunks...`);
+            
             const chunksToInsert = metadata.chunks
                 .filter(chunk => chunk.cleanedText && chunk.cleanedText.trim().length > 0)  // Filter out empty chunks
                 .map(chunk => ({
@@ -71,13 +73,11 @@ export async function saveAnalysis(content, type, metadata = {}) {
                     document_source_id: documentSourceId,
                     start_index: chunk.startIndex,
                     end_index: chunk.endIndex,
-                    first_word: chunk.firstWord,
-                    last_word: chunk.lastWord,
                     cleaned_text: chunk.cleanedText.trim(),
-                    original_text: content.slice(chunk.startIndex - 1, chunk.endIndex),
+                    original_text: chunk.originalText || content.slice(chunk.startIndex - 1, chunk.endIndex),
                     warnings: Array.isArray(chunk.warnings) ? chunk.warnings.join('\n') : chunk.warnings,
-                    raw_metadata: chunk.metadata || null,
-                    created_at: new Date().toISOString()
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString()
                 }));
 
             if (chunksToInsert.length > 0) {
@@ -85,7 +85,11 @@ export async function saveAnalysis(content, type, metadata = {}) {
                     .from('chunks')
                     .insert(chunksToInsert);
 
-                if (chunksError) throw chunksError;
+                if (chunksError) {
+                    console.error('Error saving chunks:', chunksError);
+                } else {
+                    console.log(`${chunksToInsert.length} chunks saved successfully`);
+                }
             }
         }
 
@@ -99,12 +103,15 @@ export async function saveAnalysis(content, type, metadata = {}) {
                 })
                 .eq('id', documentSourceId);
 
-            if (updateError) throw updateError;
+            if (updateError) {
+                console.error('Error updating document source:', updateError);
+            }
         }
-
+        
+        // Return the document with ID for tracking in batch processing
         return document;
     } catch (error) {
-        console.error('Error saving to database:', error);
+        console.error('Error in saveAnalysis:', error);
         throw error;
     }
 }

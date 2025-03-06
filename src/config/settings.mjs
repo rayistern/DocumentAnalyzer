@@ -66,7 +66,7 @@ export const OPENAI_PROMPTS = {
 {
     "longDescription": "1-2 paragraphs describing the main content and arguments. Leverage transliterated Hebrew terminology for domain specific terms.",
     "keywords": ["array", "of", "key", "topics", "and", "themes"], -- specific keywords on this specific piece of text or letter, not generic like "chabad" or "jewish"
-    "questionsAnswered": ["Question?", "Answer"] -- One Q&A pair: An implied question which the text addresses. This Q&A pair will be used for future training. Please output a thorough, long form answer, the way an LLM should respond conversationally. Include only information that is stated in the text, and only that information which answers the question.
+    "questionsAnswered": ["Question?", "Answer"] -- One Q&A pair: An implied question which the text addresses. This Q&A pair will be used for future training, so please imagine it as a user's question having not seen the text at all. Output a thorough, long form answer, the way an LLM should respond conversationally. Include only information that is stated in the text, and only that information which answers the question.
 }`
         }),
         chunk: (maxChunkLength, isIncomplete = false) => ({

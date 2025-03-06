@@ -83,6 +83,7 @@ program
     .option('-r, --reprocess-incomplete', 'reprocess documents that are in processing status')
     .option('--skipMetadata', 'skip the fullMetadata processing step')
     .option('--continuation', 'treat this document as a continuation of the previous one')
+    .option('--previousDocumentId <id>', 'ID of the previous document to use for continuation')
     .option('-g, --group <n>', 'group name for the documents')
     .option('--reverse', 'process files in reverse order')
     .action(async (pattern, options) => {
@@ -114,6 +115,9 @@ program
             // Skip files until we reach the start point
             let shouldProcess = !startFromFile;
             
+            // Track in-memory remainder text for continuation
+            let remainderText = null;
+            
             for (const file of files) {
                 try {
                     const filename = path.basename(file);
@@ -140,6 +144,12 @@ program
                     // Convert to text
                     const text = await convertToText(file);
                     
+                    // Add clear logging about continuation status
+                    console.log(`Continuation mode: ${options.continuation ? 'ON' : 'OFF'}`);
+                    if (options.continuation && remainderText !== null) {
+                        console.log(`Using in-memory remainder text (${remainderText.length} chars)`);
+                    }
+                    
                     // Process the text
                     const result = await processFile(
                         text, 
@@ -149,7 +159,10 @@ program
                         options.overview,
                         options.skipMetadata,
                         options.continuation,
-                        options.group
+                        options.group,
+                        null,  // No longer using previousDocumentId at all
+                        // Pass in-memory remainder directly
+                        options.continuation ? remainderText : null
                     );
 
                     console.log(`Successfully processed ${filename}`);
@@ -158,12 +171,21 @@ program
                         console.log('Warnings:', result.warnings);
                     }
 
-                    // When saving analysis, pass the group number
-                    await saveAnalysis(text, options.skipMetadata ? 'cleanAndChunk' : 'fullMetadata_only', {
-                        filepath: filename,
+                    // Save the document along with processing results
+                    const savedDoc = await saveAnalysis(text, options.skipMetadata ? 'cleanAndChunk' : 'fullMetadata_only', {
                         warnings: result.warnings || [],
-                        groupNumber: options.group
+                        groupNumber: options.group,
+                        // Include the chunks for saving
+                        chunks: result.chunks || [],
+                        // Add filepath parameter
+                        filepath: filename
                     });
+                    
+                    // Update in-memory remainder for next file
+                    if (result.remainderText) {
+                        remainderText = result.remainderText;
+                        console.log(`Stored remainder text for next file (${remainderText.length} chars)`);
+                    }
                 } catch (error) {
                     console.error(`Error processing ${file}:`, error.message);
                 }

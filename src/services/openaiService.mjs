@@ -38,7 +38,7 @@ function getModelForOperation(operation) {
     return OPENAI_SETTINGS.modelConfig.operations[operation] || OPENAI_SETTINGS.model;
 }
 
-export async function processFile(content, type, filepath, maxChunkLength = OPENAI_SETTINGS.defaultMaxChunkLength, overview = '', skipMetadata = false, isContinuation = false, contentHash = null) {
+export async function processFile(content, type, filepath, maxChunkLength = OPENAI_SETTINGS.defaultMaxChunkLength, overview = '', skipMetadata = false, isContinuation = false, contentHash = null, previousDocumentId = null, inMemoryRemainderText = null) {
     try {
         switch (type) {
             case 'sentiment':
@@ -46,7 +46,7 @@ export async function processFile(content, type, filepath, maxChunkLength = OPEN
             case 'chunk':
                 return await createChunks(content, maxChunkLength, filepath);
             case 'cleanAndChunk':
-                return await cleanAndChunkDocument(content, maxChunkLength, filepath, overview, skipMetadata, isContinuation, contentHash);
+                return await cleanAndChunkDocument(content, maxChunkLength, filepath, overview, skipMetadata, isContinuation, contentHash, previousDocumentId, inMemoryRemainderText);
             case 'fullMetadata_only':
                 // Save initial document
                 const document = await saveAnalysis(content, 'fullMetadata_only', { filepath });
@@ -482,52 +482,33 @@ function findCompleteBoundary(text, position, word) {
  * @param {boolean} skipMetadata - Whether to skip metadata generation
  * @param {boolean} isContinuation - Whether this document continues from a previous one
  * @param {string} contentHash - Optional content hash
+ * @param {string} previousDocumentId - Deprecated - kept for backward compatibility
+ * @param {string} inMemoryRemainderText - Remainder text from previous document (passed in memory)
  * @returns {Object} Processing results including chunks and warnings
  */
-async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview = '', skipMetadata = false, isContinuation = false, contentHash = null) {
+async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview = '', skipMetadata = false, isContinuation = false, contentHash = null, previousDocumentId = null, inMemoryRemainderText = null) {
     console.log('\n=== Starting Document Processing ===');
     console.log(`Total document length: ${content.length} characters`);
     console.log(`Max chunk length: ${maxChunkLength} characters`);
     console.log('=====================================\n');
     
-    // If this is a continuation, get the last chunk or remainder from previous document
-    let previousText = '';
+    // Initialize remainder text - ONLY use in-memory tracking
+    let remainderText = '';
     
-    if (isContinuation) {
-        console.log('Getting previous document context...');
-        const { data: lastDoc, error: lastDocError } = await supabase
-            .from('documents')
-            .select('id')
-            .order('created_at', { ascending: false })
-            .limit(1);
-            
-        if (!lastDocError && lastDoc?.length > 0) {
-            // First try to get remainder
-            const { data: remainder, error: remainderError } = await supabase
-                .from('document_remainders')
-                .select('remainder_text')
-                .eq('document_id', lastDoc[0].id)
-                .single();
-                
-            if (!remainderError && remainder?.remainder_text) {
-                previousText = remainder.remainder_text;
-                console.log('Using remainder from previous document');
-            } else {
-                // If no remainder, get last chunk
-                const { data: lastChunk, error: chunkError } = await supabase
-                    .from('chunks')
-                    .select('cleaned_text')
-                    .eq('document_id', lastDoc[0].id)
-                    .order('end_index', { ascending: false })
-                    .limit(1)
-                    .single();
-                    
-                if (!chunkError && lastChunk) {
-                    previousText = lastChunk.cleaned_text;
-                    console.log('Using last chunk from previous document');
-                }
-            }
+    // If we have in-memory remainder text, use it directly
+    if (isContinuation && inMemoryRemainderText !== null) {
+        console.log('Using in-memory remainder text from previous document');
+        remainderText = inMemoryRemainderText;
+        console.log(`Remainder text length: ${remainderText.length} chars`);
+        if (remainderText.length > 0) {
+            console.log(`First 50 chars: "${remainderText.substring(0, Math.min(50, remainderText.length))}"`);
+            console.log("REMAINDER-TRACK: Initialized with in-memory remainder");
         }
+    } else if (isContinuation) {
+        console.log("Continuation requested but no remainder text available");
+        console.log("Using empty remainder (continuation without in-memory remainder is not supported)");
+    } else {
+        console.log('Not a continuation - starting with empty remainder');
     }
     
     // Save initial document with the raw content hash
@@ -549,8 +530,6 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
     
     let cleanedChunks = [];
     let allTextToRemove = [];
-    let remainderText = '';
-    console.log("REMAINDER-TRACK: Initial value is empty string");
     let finalCleanedText = '';  // Store the complete cleaned text
 
     // Constants for chunk boundary handling
@@ -761,12 +740,10 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         }
 
         // Add previous document context if this is a continuation and we're on the first chunk
-        if (i === 0 && isContinuation && previousText) {
-            console.log('Adding previous document context...');
-            finalCleanedText = previousText + '\n\n' + finalCleanedText;
-            
-            // Log the text after adding previous context
-            debugLogText("AFTER ADDING PREVIOUS CONTEXT", finalCleanedText, false);
+        if (i === 0 && isContinuation && remainderText.length > 0) {
+            // We already included the remainder text at the beginning of finalCleanedText
+            console.log('Continuation active - remainder is already included at the beginning of the text');
+            debugLogText("TEXT WITH REMAINDER", finalCleanedText.substring(0, Math.min(100, finalCleanedText.length)), false);
         }
 
         console.log(`Preparing to chunk with total text length: ${finalCleanedText.length}`);
@@ -840,6 +817,11 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         let parsedResponse;
         try {
             parsedResponse = parseJsonResponse(removeMarkdownFormatting(chunkResponse.choices[0].message.content));
+            // Ensure parsedResponse always has chunks array
+            if (!parsedResponse.chunks) {
+                parsedResponse.chunks = [];
+                console.log("No chunks found in LLM response, initializing empty chunks array");
+            }
         } catch (parseError) {
             console.warn('Failed to parse chunk response as JSON:', parseError.message);
             // Store the raw response and continue
@@ -865,7 +847,7 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
             parsedResponse.chunks.forEach((c, index) => {
                 console.log(`\nChunk ${index + 1}:`);
                 console.log(`Start: ${c.startIndex}, End: ${c.endIndex}`);
-                console.log(`Text: ${c.cleanedText}`);
+                console.log(`Text: ${c.cleanedText || "No text provided"}`);
             });
         } else {
             // If LLM didn't return chunks, treat entire cleaned text as remainder
@@ -873,182 +855,68 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
             console.log("[TRACK] UPDATED: remainderText = finalCleanedText (entire text) because no chunks returned");
             console.log("[TRACK] new remainderText length: " + remainderText.length + " chars");
             console.log('No chunks returned, entire text is remainder');
+            
+            // Ensure parsedResponse has a chunks array
+            parsedResponse.chunks = [];
         }
 
-        const chunkResult = parsedResponse;
-
-        // Process chunks and determine remainder text for next iteration
-        if (chunkResult.chunks && chunkResult.chunks.length > 0) {
-            // Log pre-chunk information for debugging
-            console.log('\nPre-chunk info:');
-            console.log(`Start position: ${chunk.startPosition}`);
-            console.log(`End position: ${chunk.endPosition}`);
-            console.log(`Remainder length: ${remainderText.length}`);
-            console.log(`Combined text length: ${finalCleanedText.length}`);
-            console.log(`Cleaned text length: ${cleanedText.length}`);
-            console.log(`Effective text length: ${finalCleanedText.length}`);  // Add this log
-
-            let cumulativeOffset = 0;  // Reset for each chunk processing
-            let previousAdjustedEnd = 0;  // Reset for each chunk processing
-
-            chunkResult.chunks = chunkResult.chunks
-                .map((c, index) => {
-                    // Check if we need to force start after previous chunk
-                    let startIndex = c.startIndex;
-                    let endIndex = c.endIndex;
-                    
-                    if (index > 0) {
-                        const gap = startIndex - (previousAdjustedEnd + 1);
-                        if (gap < 0) {
-                            // Handle negative gap (chunk trying to start before previous ended)
-                            startIndex = Math.min(previousAdjustedEnd + 1, finalCleanedText.length);
-                            console.log(`Negative gap detected (${gap}). Forcing chunk to start at ${startIndex}`);
-                        } else if (gap > OPENAI_SETTINGS.gapConfig.maxTolerance) {
-                            // Handle too large positive gap
-                            startIndex = Math.min(previousAdjustedEnd + 1, finalCleanedText.length);
-                            console.log(`Gap of ${gap} exceeds tolerance. Forcing chunk to start at ${startIndex}`);
-                        }
-                    }
-                    
-                    // Use effectiveTextLength for validation
-                    if (startIndex >= finalCleanedText.length) {
-                        console.log(`Start index ${startIndex} exceeds text length ${finalCleanedText.length}. Stopping chunk processing.`);
-                        return { drop_remaining: true };
-                    }
-
-                    // Ensure end index doesn't exceed text length and is after start
-                    if (endIndex > finalCleanedText.length) {
-                        console.log(`End index ${endIndex} exceeds text length ${finalCleanedText.length}. Adjusting to text end.`);
-                        endIndex = finalCleanedText.length;
-                        // Signal to stop processing further chunks after this one
-                        c.drop_remaining = true;
-                    }
-
-                    if (endIndex <= startIndex) {
-                        console.log(`End index ${endIndex} is not after start index ${startIndex}. Stopping chunk processing.`);
-                        return { drop_remaining: true };
-                    }
-                    
-                    // Store this chunk's adjusted end for next iteration
-                    previousAdjustedEnd = endIndex;
-                    
-                    // Debug output
-                    console.log('\n=== Chunk processing ===');
-                    console.log('LLM returned:');
-                    console.log(`- Original positions: ${c.startIndex}-${c.endIndex}`);
-                    console.log(`- Adjusted start: ${startIndex}, end: ${endIndex}`);
-                    console.log(`- First word: "${c.firstWord}"`);
-                    console.log(`- Last word: "${c.lastWord}"`);
-                    
-                    // The LLM's character counting can differ from our text due to:
-                    // 1. Escaped characters being counted differently
-                    // 2. Unicode/special characters being interpreted differently
-                    // 3. Whitespace normalization
-                    // So we need to adjust positions using a cumulative offset
-                    const suggestedStartIndex = startIndex + cumulativeOffset;
-                    const suggestedEndIndex = endIndex + cumulativeOffset;
-                    
-                    // Find the actual positions of first/last words within a tolerance range
-                    // This is critical for ensuring our chunks start/end exactly where the LLM intended
-                    // Chunking strategy:
-                    // 1. For chunk starts: Try to find LLM's word, fall back to previous chunk end (or doc start)
-                    // 2. For chunk ends: Try to find LLM's word, if not found add overlap to avoid cutting mid-sentence
-                    const findWordPosition = (text, targetWord, nearPosition, isStart, previousChunkEnd = 0) => {
-                        // Ensure nearPosition is within text bounds
-                        console.log(`\nfindWordPosition input values:`);
-                        console.log(`- Original nearPosition: ${nearPosition}`);
-                        console.log(`- Text length: ${text.length}`);
-                        console.log(`- Previous chunk end: ${previousChunkEnd}`);
-                        
-                        const origNearPosition = nearPosition;  // Store original for logging
-                        nearPosition = Math.min(Math.max(0, nearPosition), text.length);
-                        if (nearPosition !== origNearPosition) {
-                            console.log(`- nearPosition adjusted to: ${nearPosition} (was: ${origNearPosition})`);
-                        }
-                        
-                        // For start positions, search from previous chunk end
-                        // For end positions, search from current chunk start
-                        const searchStart = Math.max(0, nearPosition - tolerance);
-                        const searchEnd = Math.min(text.length, nearPosition + tolerance);
-                        console.log(`- Search range: ${searchStart}-${searchEnd}`);
-                        
-                        // If search bounds are invalid, use safe position
-                        if (searchStart >= searchEnd) {
-                            const safeStart = isStart ? previousChunkEnd : Math.max(nearPosition, previousChunkEnd + 1);
-                            return safeStart;
-                        }
-
-                        const searchArea = text.substring(searchStart, searchEnd);
-                        console.log(`- Search area length: ${searchArea.length}`);
-                        
-                        const searchAreaWords = searchArea.split(/\s+/);
-                        console.log(`- Search area words: ${searchAreaWords.join(', ')}`);
-                        
-                        // Try to find the word in the search area
-                        const wordIndex = searchAreaWords.findIndex(word => word.toLowerCase() === targetWord.toLowerCase());
-                        if (wordIndex !== -1) {
-                            return searchStart + wordIndex;
-                        }
-
-                        // If word not found, use safe position
-                        const safePosition = isStart ? previousChunkEnd : Math.max(nearPosition, previousChunkEnd + 1);
-                        return safePosition;
-                    };
-
-                    // Find the actual positions of first/last words within a tolerance range
-                    const firstWordPosition = findWordPosition(finalCleanedText, c.firstWord, c.startIndex, true);
-                    const lastWordPosition = findWordPosition(finalCleanedText, c.lastWord, c.endIndex, false);
-                    
-                    // Store the found positions
-                    c.startIndex = firstWordPosition;
-                    c.endIndex = lastWordPosition;
-                    
-                    // Debug output
-                    console.log('\n=== Word position analysis ===');
-                    console.log(`- First word: "${c.firstWord}"`);
-                    console.log(`- Last word: "${c.lastWord}"`);
-                    console.log(`- First word position: ${firstWordPosition}`);
-                    console.log(`- Last word position: ${lastWordPosition}`);
-                    
-                    // Adjust positions using cumulative offset
-                    c.startIndex += cumulativeOffset;
-                    c.endIndex += cumulativeOffset;
-                    
-                    // Debug output
-                    console.log('\n=== Position adjustment ===');
-                    console.log(`- Original positions: ${c.startIndex}-${c.endIndex}`);
-                    console.log(`- Adjusted positions: ${c.startIndex}-${c.endIndex}`);
-                });
-
-            // Calculate the new remainder text after all chunks have been processed
-            // The remainder text is everything in finalCleanedText that comes after the last chunk's end
-            const lastChunk = chunkResult.chunks[chunkResult.chunks.length - 1];
-            if (lastChunk && !lastChunk.drop_remaining) {
-                // Only update remainderText if the last processed chunk is valid
-                // Get everything after the last chunk's end index
-                remainderText = finalCleanedText.substring(lastChunk.endIndex);
-                console.log(`[TRACK] UPDATED: remainderText = text after last chunk (${lastChunk.endIndex} to end)`);
-                console.log(`[TRACK] new remainderText length: ${remainderText.length} chars`);
+        // Ensure chunkResult is always defined with at least empty arrays
+        const chunkResult = {
+            chunks: parsedResponse.chunks || [],
+            warnings: parsedResponse.warnings || []
+        };
+        
+        // Add detailed logging for remainder text
+        console.log('\n=== REMAINDER TEXT CALCULATION ===');
+        console.log(`Current finalCleanedText length: ${finalCleanedText.length} chars`);
+        
+        // Log the first and last 50 characters of finalCleanedText for debugging
+        if (finalCleanedText.length > 0) {
+            console.log(`First 50 chars: "${finalCleanedText.substring(0, Math.min(50, finalCleanedText.length))}"`);
+            if (finalCleanedText.length > 100) {
+                console.log(`Last 50 chars: "${finalCleanedText.substring(Math.max(0, finalCleanedText.length - 50))}"`);
             }
-        } else {
-            // If LLM didn't return chunks, treat entire cleaned text as remainder
-            remainderText = finalCleanedText;
-            console.log("[TRACK] UPDATED: remainderText = finalCleanedText (entire text) because no chunks returned");
-            console.log("[TRACK] new remainderText length: " + remainderText.length + " chars");
         }
+
+        // Calculate the new remainder text after all chunks have been processed
+        // The remainder text is everything in finalCleanedText that comes after the last chunk's end
+        const lastChunk = chunkResult?.chunks?.length > 0 ? chunkResult.chunks[chunkResult.chunks.length - 1] : null;
+        if (lastChunk && !lastChunk.drop_remaining) {
+            // Only update remainderText if the last processed chunk is valid
+            // Get everything after the last chunk's end index
+            remainderText = finalCleanedText.substring(lastChunk.endIndex);
+            console.log(`[TRACK] UPDATED: remainderText = text after last chunk (${lastChunk.endIndex} to end)`);
+            console.log(`[TRACK] new remainderText length: ${remainderText.length} chars`);
+            
+            // Log the first 50 characters of the remainder for debugging
+            if (remainderText.length > 0) {
+                console.log(`Remainder first 50 chars: "${remainderText.substring(0, Math.min(50, remainderText.length))}"`);
+                if (remainderText.length > 100) {
+                    console.log(`Remainder last 50 chars: "${remainderText.substring(Math.max(0, remainderText.length - 50))}"`);
+                }
+            }
+        }
+        
+        // Save the current chunkResult for this pre-chunk iteration
+        cleanedChunks = [...cleanedChunks, ...chunkResult.chunks];
     }
 
-    // Store final remainder text in Supabase
-    const { error: remainderError } = await supabase
-        .from('document_remainders')
-        .insert({
-            document_id: document.id,
-            remainder_text: remainderText,
-            remainder_length: remainderText.length
-        });
+    // Create a final chunkResult to be returned
+    const finalChunkResult = {
+        chunks: cleanedChunks,
+        warnings: []
+    };
 
-    if (remainderError) {
-        console.error('Error storing remainder text:', remainderError);
+    // Log final remainder text details before returning
+    console.log('\n=== FINAL REMAINDER TEXT DETAILS ===');
+    console.log(`Final remainder length: ${remainderText.length} chars`);
+    if (remainderText.length > 0) {
+        console.log(`First 50 chars: "${remainderText.substring(0, Math.min(50, remainderText.length))}"`);
+        if (remainderText.length > 100) {
+            console.log(`Last 50 chars: "${remainderText.substring(Math.max(0, remainderText.length - 50))}"`);
+        }
+    } else {
+        console.log('No remainder text');
     }
 
     // Store processed document in Supabase
@@ -1067,9 +935,9 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
 
     // Make sure chunkResult is defined before returning
     return {
-        chunks: chunkResult?.chunks || [],
+        chunks: finalChunkResult.chunks,
         remainderText: remainderText,
-        warnings: chunkResult?.warnings || []
+        warnings: finalChunkResult.warnings
     };
 }
 
