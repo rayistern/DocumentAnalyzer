@@ -109,6 +109,80 @@ if (result.remainderText) {
 2. Check that processing includes remainder at the beginning of next document
 3. Review the index calculations when creating chunks
 
+### Issue: Chunks Have Incorrect Text or Boundaries
+
+**Symptoms**:
+- Text appears cut off mid-word
+- Chunks contain wrong text compared to original document
+- Missing words at chunk boundaries
+
+**Solutions**:
+1. Check the position adjustment logs in the console output:
+   ```
+   findWordPosition input values:
+   - Target word: "example"
+   - Original nearPosition: 150
+   - Text length: 1000
+   - Previous chunk end: 100
+   ```
+
+2. Look for warnings about word boundary detection failures:
+   ```
+   No match found for "targetWord" near 250
+   Using safe start position: 251
+   ```
+
+3. Check for cumulative offset issues:
+   ```
+   Position drift: 5 characters from LLM's calculation
+   ```
+
+4. If text includes special characters or Unicode, position calculations may be off. Try:
+   ```
+   First chars of text (hex): 61 62 20 63 64 20
+   ```
+
+5. Look at extracted chunk text stats:
+   ```
+   Chunk text stats: length=250, words=45, first=FirstWord, last=LastWord
+   ```
+
+### Issue: Empty or Missing Chunks
+
+**Symptoms**:
+- Chunks filter shows "No valid chunks to insert after filtering"
+- Chunks have positions but no text content
+- Gaps between chunks in the database
+
+**Solutions**:
+1. If the LLM returns positions but no text:
+   ```
+   Warning: Missing boundary words for chunk 150-300
+   ```
+   The system will try to extract text from the positions, check if this extraction worked:
+   ```
+   Re-extracted text with adjusted boundaries
+   ```
+
+2. If chunk positions are invalid (start >= end):
+   ```
+   Warning: Invalid chunk positions (start=300 >= end=200)
+   ```
+   Look for issues in the offset calculation or LLM response format.
+
+3. Add more detail to the extracted text logs by setting debugging level higher in `settings.mjs`:
+   ```javascript
+   debug: {
+     showExtractedText: true,
+     verbosePositionLogs: true
+   }
+   ```
+
+4. If chunks are too small or too large, check the LLM's chunking configuration:
+   ```
+   Max chunk length: 2000
+   ```
+
 ## Logging and Debugging
 
 ### Enabling Enhanced Logging

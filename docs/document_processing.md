@@ -65,6 +65,58 @@ The Document Analyzer processes large documents by splitting them into semantic 
    - Validate all chunks for coverage and consistency
    - Save chunks to database
 
+## Chunk Boundary Detection
+
+A critical aspect of document processing is accurately detecting chunk boundaries. This system employs sophisticated position detection to ensure chunk boundaries occur at word breaks rather than arbitrary character positions.
+
+### Position Calculation Flow
+
+1. **Text Preparation**
+   - Remainder text is prepended to the cleaned pre-chunk text
+   - LLM receives the combined text (`finalCleanedText`) for chunking
+   - LLM returns chunk positions that already include remainder offset (since it's part of the input)
+
+2. **Position Adjustment Mechanisms**
+
+   - **Cumulative Offset**: Tracks position drift between the LLM's calculation and actual text positions
+     - Reset for each new pre-chunk (each LLM call)
+     - Applied to all chunks within the same pre-chunk
+     - Compensates for Unicode handling differences and other position drift
+
+   - **Word Boundary Detection**: Uses `findWordPosition` to locate exact word matches
+     - Tries exact word matching within a tolerance range
+     - Falls back to fuzzy matching when exact matches fail
+     - Uses different strategies for start vs. end positions
+     - Ensures chunk boundaries are at word breaks, not mid-word
+
+   - **Position Safety**: Ensures positions are valid and consistent
+     - Prevents overlap with previous chunks
+     - Handles out-of-bounds positions
+     - Maintains minimum chunk sizes
+
+3. **Remainder Calculation**
+   - Uses the adjusted end position of the last chunk to determine where remainder text begins
+   - Remainder = everything after the last chunk's end 
+   - Ensures remainder starts at a proper word boundary
+
+### Example Position Flow
+
+```
+Initial Text: "This is some text with remainder prepended."
+LLM Says: "Chunk from position 6-15"
+Cumulative Offset: +2 (from previous chunks)
+Adjusted Position: 8-17
+Word Boundary Detection: Finds exact words at 9-18
+Final Chunk: position 9-18 with text "some text"
+```
+
+This system ensures that:
+
+1. Chunk boundaries always occur at word breaks
+2. Remainder text length is properly accounted for in all position calculations
+3. Position drift doesn't affect chunk integrity
+4. Chunks have proper content even if LLM returns incomplete data
+
 ## Remainder Text Handling
 
 The system keeps remainder text completely in-memory:

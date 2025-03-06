@@ -485,7 +485,10 @@ function findCompleteBoundary(text, position, word) {
  * 3. Uses different strategies for start vs. end positions
  * 4. Ensures positions are valid and within text bounds
  * 
- * @param {string} text - The text to search in
+ * IMPORTANT: Works on the finalCleanedText which already includes the remainder text,
+ * so all positions automatically account for remainder length.
+ * 
+ * @param {string} text - The text to search in (complete text with remainder prepended)
  * @param {string} targetWord - The word to find 
  * @param {number} nearPosition - Approximate position where word should be
  * @param {boolean} isStart - Whether this is a start position (vs. end)
@@ -1057,15 +1060,37 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
 
         if (parsedResponse.chunks) {
             console.log(`Number of chunks returned: ${parsedResponse.chunks.length}`);
-            // Process chunks to ensure they have text content and accurate positions
-            let cumulativeOffset = 0;  // Track position adjustments
-            let previousAdjustedEnd = 0;  // Track end of previous chunk
+            
+            /**
+             * POSITION ADJUSTMENT LOGIC
+             * 
+             * 1. The LLM returns positions relative to the text it received (finalCleanedText)
+             * 2. The finalCleanedText already includes remainder text at the beginning
+             * 3. Within each prechunk, we track position drift with cumulativeOffset
+             * 4. Each prechunk resets cumulativeOffset because each is a separate LLM call
+             * 
+             * This approach ensures:
+             * - Remainder text length is automatically accounted for (it's part of finalCleanedText)
+             * - Position drift within a single LLM response is tracked and corrected
+             * - Word boundaries are accurately detected even with Unicode/special characters
+             */
+            let cumulativeOffset = 0;  // Resets for each prechunk's LLM call
+            let previousAdjustedEnd = 0;  // Tracks last chunk's end position
             
             parsedResponse.chunks = parsedResponse.chunks.map((chunk, index) => {
                 console.log(`\nChunk ${index + 1}:`);
                 console.log(`Original: Start: ${chunk.startIndex}, End: ${chunk.endIndex}`);
                 
-                // Apply cumulative offset from previous chunks if available
+                /**
+                 * OFFSET ADJUSTMENT
+                 * 
+                 * Apply cumulative offset from previous chunks in this prechunk.
+                 * This accounts for any drift between where the LLM thinks positions are
+                 * and where they actually are (often due to Unicode handling differences).
+                 * 
+                 * NOTE: The LLM's position numbers already account for remainder text
+                 * because remainder is prepended to the text before sending to the LLM.
+                 */
                 const offsetAdjustedStartIndex = chunk.startIndex + cumulativeOffset - 1; // Convert to 0-indexed
                 const offsetAdjustedEndIndex = chunk.endIndex + cumulativeOffset - 1;  // Convert to 0-indexed
                 
@@ -1108,8 +1133,16 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                     chunk.adjustedEndIndex = adjustedEndIndex + 1;
                     previousAdjustedEnd = adjustedEndIndex;
                     
-                    // Calculate new cumulative offset for next chunks
-                    // This tracks drift between LLM's position calculations and actual text
+                    /**
+                     * CUMULATIVE OFFSET CALCULATION
+                     * 
+                     * Calculate how far the actual end position (adjustedEndIndex) differs 
+                     * from where the LLM thought it was (chunk.endIndex-1). This "drift"
+                     * is then applied to future chunks in this prechunk.
+                     * 
+                     * This offset doesn't carry between prechunks because each prechunk
+                     * gets its own LLM call with different position references.
+                     */
                     const newOffset = adjustedEndIndex - (chunk.endIndex - 1);  // Compare to original end position
                     console.log(`Position drift: ${newOffset} characters from LLM's calculation`);
                     cumulativeOffset = newOffset;  // Update for next chunk
@@ -1175,6 +1208,15 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         // The remainder text is everything in finalCleanedText that comes after the last chunk's end
         const lastChunk = chunkResult?.chunks?.length > 0 ? chunkResult.chunks[chunkResult.chunks.length - 1] : null;
         if (lastChunk && !lastChunk.drop_remaining) {
+            /**
+             * REMAINDER CALCULATION
+             * 
+             * The remainder is calculated using adjustedEndIndex when available,
+             * which has been precisely determined using word boundary detection.
+             * 
+             * This ensures the remainder starts at an accurate word boundary that
+             * accounts for all position adjustments (including cumulative offset).
+             */
             // Only update remainderText if the last processed chunk is valid
             // Get everything after the last chunk's end index
             // Use adjustedEndIndex if available, fall back to endIndex
@@ -1257,7 +1299,18 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                 
                 return {
                     ...chunk,
-                    // Use adjusted positions if available, otherwise use original
+                    /**
+                     * FINALIZED POSITIONS
+                     * 
+                     * Always use the adjustedStartIndex/adjustedEndIndex for chunk boundaries
+                     * if available. These positions have been carefully determined through:
+                     * 1. Cumulative offset adjustment within the prechunk
+                     * 2. Word boundary detection
+                     * 3. Safety checks to ensure valid ranges
+                     * 
+                     * These positions correctly account for remainder text because they
+                     * are based on finalCleanedText which already includes remainder.
+                     */
                     startIndex: chunk.adjustedStartIndex || chunk.startIndex,
                     endIndex: chunk.adjustedEndIndex || chunk.endIndex,
                     firstWord,
