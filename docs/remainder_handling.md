@@ -11,7 +11,7 @@ Remainder text is content that wasn't included in the semantic chunks of a docum
 ### Key Principles:
 
 1. **In-Memory Approach**: Remainder text is passed in memory between document processing calls
-2. **No Database Storage**: Remainder text is not stored in the database (except as raw_llm_response for reference)
+2. **No Database Storage**: Remainder text is never stored in the database
 3. **Already Cleaned**: Remainder text is already cleaned and should never be cleaned again
 4. **Prepending**: Remainder text is prepended to cleaned text before chunking
 
@@ -85,7 +85,7 @@ return {
 
 ### 1. Simplification of Remainder Handling
 
-- **Removed Database Dependencies**: Eliminated reliance on document_remainders table
+- **Removed Database Dependencies**: Completely eliminated any database storage of remainder text
 - **Exclusive In-Memory Approach**: Now uses only in-memory remainder passing
 - **Streamlined Commands**: Simplified batch processing to directly pass remainder between documents
 

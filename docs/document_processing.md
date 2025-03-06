@@ -67,12 +67,12 @@ The Document Analyzer processes large documents by splitting them into semantic 
 
 ## Remainder Text Handling
 
-The remainder handling is crucial for maintaining document continuity:
+The system keeps remainder text completely in-memory:
 
-1. **Creation**: After chunking, text after the last chunk becomes remainder
-2. **Storage**: Stored in the `remainderText` variable
-3. **Utilization**: Prepended to the next pre-chunk's CLEANED text (not raw text)
-4. **Key Point**: Remainder text is already cleaned and should not be cleaned again
+1. Remainder text is NEVER stored in the database
+2. It is passed between documents via in-memory variables
+3. The `raw_llm_response` field is reserved for storing actual LLM responses from metadata operations
+4. Each batch run will have its own in-memory remainder tracking across files
 
 ## Continuity Across Documents
 
@@ -83,7 +83,8 @@ When processing continues across multiple documents:
    - This remainder is prepended to the first pre-chunk's cleaned text
 
 2. **Final Remainder**:
-   - Last remainder from final document is saved for potential continuation
+   - Last remainder from final document is kept in memory for potential continuation
+   - Passed to the next document but never stored in the database
 
 ## Important Variables
 
@@ -141,7 +142,7 @@ Documents are saved in the database only once but updated as processing complete
 3. **Document Update**: After chunks are saved
    - Updates the original document record 
    - Sets `status: 'processed'`
-   - Stores the remainder text in `raw_llm_response` field
+   - Remainder text is kept in memory only, not stored in the database
 
 ```javascript
 // 1. Initial save in cleanAndChunkDocument function
@@ -162,11 +163,10 @@ const chunksToInsert = finalChunkResult.chunks
 
 await supabase.from('chunks').insert(chunksToInsert);
 
-// 3. Update document status and remainder text
+// 3. Update document status (remainder text NEVER stored in database)
 await supabase
     .from('documents')
     .update({
-        raw_llm_response: remainderText,
         status: 'processed',
         warnings: finalChunkResult.warnings || [],
         updated_at: new Date().toISOString()

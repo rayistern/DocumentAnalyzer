@@ -989,18 +989,17 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
             }
         }
         
-        // 2. Update the document status and remainder text
+        // 2. Update the document status (do NOT store remainder text in database)
         await supabase
             .from('documents')
             .update({
-                raw_llm_response: remainderText,
                 status: 'processed',
                 warnings: finalChunkResult.warnings || [],
                 updated_at: new Date().toISOString()
             })
             .eq('id', document.id);
             
-        console.log(`Updated document ${document.id} with ${finalChunkResult.chunks.length} chunks and remainder`);
+        console.log(`Updated document ${document.id} with ${finalChunkResult.chunks.length} chunks (remainder text kept in memory only)`);
     } catch (error) {
         console.error('Error updating document with chunks:', error);
     }

@@ -36,7 +36,7 @@ Stores processed documents and their metadata:
 | content_hash | Hash of content for deduplication |
 | status | Processing status |
 | duplicate_of | Reference to duplicate document (if skipped) |
-| raw_llm_response | Raw LLM response (stores remainder text) |
+| raw_llm_response | Raw LLM response for metadata operations |
 | created_at | Creation timestamp |
 | updated_at | Last update timestamp |
 
@@ -126,11 +126,10 @@ await supabase.from('chunks').insert(chunksToInsert);
 ### Status Updates
 
 ```javascript
-// Update document status to 'processed'
+// Update document status when processing is complete
 await supabase
     .from('documents')
     .update({
-        raw_llm_response: remainderText,
         status: 'processed',
         updated_at: new Date().toISOString()
     })
