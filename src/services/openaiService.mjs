@@ -475,6 +475,19 @@ function findCompleteBoundary(text, position, word) {
 /**
  * Main document processing function that cleans and chunks a document
  * 
+ * This function handles the entire document processing workflow:
+ * 1. Pre-chunking the document into manageable pieces
+ * 2. Cleaning each pre-chunk to remove unwanted text
+ * 3. Combining cleaned text with remainder from previous iterations
+ * 4. Semantic chunking of the combined text
+ * 5. Calculating new remainder text for next document
+ * 
+ * IMPORTANT CONCEPTS:
+ * - Remainder text is text that wasn't included in semantic chunks and needs to be 
+ *   carried forward to the next document or pre-chunk for processing
+ * - Remainder text is maintained entirely in memory (no database storage)
+ * - Remainder text is already cleaned and should never be cleaned again
+ * 
  * @param {string} content - Raw document content
  * @param {number} maxChunkLength - Maximum length for semantic chunks
  * @param {string} filepath - Path to the original file (for reference)
@@ -583,6 +596,14 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
          * We don't want to clean the remainder text twice.
          */
         console.log('Cleaning raw pre-chunk text...');
+        
+        // Add logging to show text being sent for cleaning
+        debugLogText("RAW PRE-CHUNK TEXT (SENT FOR CLEANING)", 
+            chunk.text.substring(0, Math.min(100, chunk.text.length)) + 
+            (chunk.text.length > 200 ? '\n... [middle content omitted] ...\n' + 
+            chunk.text.substring(chunk.text.length - 100) : ''), 
+            false);
+            
         const cleanResponse = await openai.chat.completions.create(
             createApiOptions(getModelForOperation('clean'), [
                 OPENAI_PROMPTS.cleanAndChunk.clean('', true), // Always set isIncomplete=true for continuations
@@ -652,13 +673,34 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         if (cleanResult.cleanedText) {
             // If the LLM returned cleanedText directly, use it
             cleanedText = cleanResult.cleanedText;
+            
+            // Add logging to show text after cleaning, before combining with remainder
+            debugLogText("TEXT AFTER CLEANING (BEFORE COMBINING WITH REMAINDER)", 
+                cleanedText.substring(0, Math.min(100, cleanedText.length)) + 
+                (cleanedText.length > 200 ? '\n... [middle content omitted] ...\n' + 
+                cleanedText.substring(cleanedText.length - 100) : ''), 
+                false);
         } else if (cleanResult.textToRemove && cleanResult.textToRemove.length > 0) {
             // Apply the removal of identified problematic sections to get cleaned text
             // Use the original textToRemove positions as they're already relative to the chunk
             cleanedText = cleanText(chunk.text, cleanResult.textToRemove);
+            
+            // Add logging to show text after cleaning, before combining with remainder
+            debugLogText("TEXT AFTER CLEANING (BEFORE COMBINING WITH REMAINDER)", 
+                cleanedText.substring(0, Math.min(100, cleanedText.length)) + 
+                (cleanedText.length > 200 ? '\n... [middle content omitted] ...\n' + 
+                cleanedText.substring(cleanedText.length - 100) : ''), 
+                false);
         } else {
             // If no textToRemove was identified, use the original text
             cleanedText = chunk.text;
+            
+            // Add logging to show text when no cleaning was performed
+            debugLogText("ORIGINAL TEXT (NO CLEANING NEEDED)", 
+                cleanedText.substring(0, Math.min(100, cleanedText.length)) + 
+                (cleanedText.length > 200 ? '\n... [middle content omitted] ...\n' + 
+                cleanedText.substring(cleanedText.length - 100) : ''), 
+                false);
         }
         
         /**
@@ -919,11 +961,11 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         console.log('No remainder text');
     }
 
-    // Store processed document in Supabase
+    // Store processed document in Supabase - store remainder text in raw_llm_response for reference
     const { error: documentError } = await supabase
         .from('documents')
         .update({
-            raw_llm_response: remainderText,
+            raw_llm_response: remainderText, // Store remainder text for reference only
             status: 'processed',
             updated_at: new Date().toISOString()
         })
@@ -933,14 +975,24 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         console.error('Error storing processed document:', documentError);
     }
 
-    // Make sure chunkResult is defined before returning
+    // Return the chunks and remainder text for continuation
     return {
         chunks: finalChunkResult.chunks,
-        remainderText: remainderText,
+        remainderText: remainderText, // This is critical for document continuation
         warnings: finalChunkResult.warnings
     };
 }
 
+/**
+ * Utility function for logging text samples with appropriate formatting
+ * 
+ * This function provides a consistent way to log text samples with clear formatting,
+ * making it easier to trace the flow of text through the processing pipeline.
+ * 
+ * @param {string} label - Label for the text sample
+ * @param {string} text - The text to log
+ * @param {boolean} isRemainder - Whether this is remainder text
+ */
 function debugLogText(label, text, isRemainder) {
     console.log(`\n=== ${label} ===`);
     console.log('----------------------------------------');
