@@ -126,7 +126,7 @@ When troubleshooting chunking issues:
 
 ### Document Storage Process
 
-Documents are saved in the database in one place only - inside the openaiService.mjs cleanAndChunkDocument function:
+Documents are saved in the database only once but updated as processing completes:
 
 1. **Initial Document Save**: At the start of document processing
    - Creates a new document record with `status: 'pending'`
@@ -134,35 +134,41 @@ Documents are saved in the database in one place only - inside the openaiService
    - Creates a document_sources record with the group_number
    - Returns the document ID for later reference
 
-2. **Final Update**: After processing is complete (also in cleanAndChunkDocument)
-   - Saves all chunks to the database
-   - Updates the existing document record
-   - Sets `status: 'processed'` 
+2. **Direct Chunk Saving**: After processing is complete
+   - Chunks are saved directly to the chunks table
+   - No second call to saveAnalysis to avoid duplication 
+  
+3. **Document Update**: After chunks are saved
+   - Updates the original document record 
+   - Sets `status: 'processed'`
    - Stores the remainder text in `raw_llm_response` field
 
 ```javascript
-// Initial save in cleanAndChunkDocument function
+// 1. Initial save in cleanAndChunkDocument function
 const document = await saveAnalysis(content, skipMetadata ? 'cleanAndChunk' : 'fullMetadata_only', { 
     filepath,
     groupNumber  // Group number for organization purposes
 });
 
-// Final update with chunks (also in cleanAndChunkDocument)
-await saveAnalysis(content, skipMetadata ? 'cleanAndChunk' : 'fullMetadata_only', {
-    warnings: finalChunkResult.warnings || [],
-    groupNumber: groupNumber,  // Include group number again
-    chunks: finalChunkResult.chunks || [],
-    document_source_id: document.document_source_id,
-    document: document,  // Pass the document to update instead of creating new
-    filepath: filepath
-});
+// 2. Save chunks directly to database
+const chunksToInsert = finalChunkResult.chunks
+    .filter(chunk => chunk.cleanedText && chunk.cleanedText.trim().length > 0)
+    .map(chunk => ({
+        document_id: document.id,
+        document_source_id: document.document_source_id,
+        start_index: chunk.startIndex,
+        // other fields...
+    }));
 
-// Update document status and remainder text
+await supabase.from('chunks').insert(chunksToInsert);
+
+// 3. Update document status and remainder text
 await supabase
     .from('documents')
     .update({
         raw_llm_response: remainderText,
         status: 'processed',
+        warnings: finalChunkResult.warnings || [],
         updated_at: new Date().toISOString()
     })
     .eq('id', document.id);
@@ -174,10 +180,10 @@ The `groupNumber` parameter is used to organize related documents:
 
 1. It should be passed separately from `content_hash`
 2. It gets stored in the `group_number` field in the `document_sources` table
-3. It must be included in both the initial save and the chunk update
+3. It's only needed during the initial document creation
 4. It should never be stored in the `content_hash` field of the documents table
 
-**Important**: The group number is passed in both database operations to ensure proper document organization.
+**Important**: The group number is only passed during the initial document creation, not during the update.
 
 ### Content Hash
 

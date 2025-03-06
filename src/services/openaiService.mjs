@@ -956,22 +956,46 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
     // At the end of function, update the document with chunks and remainder text
     // This replaces the second saveAnalysis call that was in index.mjs
     try {
-        // Update the document with the processed chunks and remainder
-        await saveAnalysis(content, skipMetadata ? 'cleanAndChunk' : 'fullMetadata_only', {
-            warnings: finalChunkResult.warnings || [],
-            groupNumber: groupNumber,  // Make sure to include group number again
-            chunks: finalChunkResult.chunks || [],
-            document_source_id: document.document_source_id,
-            document: document,  // Pass the document to update instead of creating new
-            filepath: filepath
-        });
+        // Don't call saveAnalysis again - just directly update the document and save chunks
+
+        // 1. Save the chunks directly
+        if (finalChunkResult.chunks && finalChunkResult.chunks.length > 0) {
+            console.log(`Saving ${finalChunkResult.chunks.length} chunks...`);
+            
+            const chunksToInsert = finalChunkResult.chunks
+                .filter(chunk => chunk.cleanedText && chunk.cleanedText.trim().length > 0)
+                .map(chunk => ({
+                    document_id: document.id,
+                    document_source_id: document.document_source_id,
+                    start_index: chunk.startIndex,
+                    end_index: chunk.endIndex,
+                    cleaned_text: chunk.cleanedText.trim(),
+                    original_text: chunk.originalText || content.slice(chunk.startIndex - 1, chunk.endIndex),
+                    warnings: Array.isArray(chunk.warnings) ? chunk.warnings.join('\n') : chunk.warnings,
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString()
+                }));
+
+            if (chunksToInsert.length > 0) {
+                const { error: chunksError } = await supabase
+                    .from('chunks')
+                    .insert(chunksToInsert);
+
+                if (chunksError) {
+                    console.error('Error saving chunks:', chunksError);
+                } else {
+                    console.log(`${chunksToInsert.length} chunks saved successfully`);
+                }
+            }
+        }
         
-        // Also make sure the raw_llm_response has the remainder text
+        // 2. Update the document status and remainder text
         await supabase
             .from('documents')
             .update({
                 raw_llm_response: remainderText,
                 status: 'processed',
+                warnings: finalChunkResult.warnings || [],
                 updated_at: new Date().toISOString()
             })
             .eq('id', document.id);
