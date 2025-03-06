@@ -171,16 +171,6 @@ program
                         console.log('Warnings:', result.warnings);
                     }
 
-                    // Save the document along with processing results
-                    const savedDoc = await saveAnalysis(text, options.skipMetadata ? 'cleanAndChunk' : 'fullMetadata_only', {
-                        warnings: result.warnings || [],
-                        groupNumber: options.group,
-                        // Include the chunks for saving
-                        chunks: result.chunks || [],
-                        // Add filepath parameter
-                        filepath: filename
-                    });
-                    
                     // Update in-memory remainder for next file
                     if (result.remainderText) {
                         remainderText = result.remainderText;

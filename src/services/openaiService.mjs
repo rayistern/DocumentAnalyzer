@@ -38,7 +38,7 @@ function getModelForOperation(operation) {
     return OPENAI_SETTINGS.modelConfig.operations[operation] || OPENAI_SETTINGS.model;
 }
 
-export async function processFile(content, type, filepath, maxChunkLength = OPENAI_SETTINGS.defaultMaxChunkLength, overview = '', skipMetadata = false, isContinuation = false, contentHash = null, previousDocumentId = null, inMemoryRemainderText = null) {
+export async function processFile(content, type, filepath, maxChunkLength = OPENAI_SETTINGS.defaultMaxChunkLength, overview = '', skipMetadata = false, isContinuation = false, groupNumber = null, previousDocumentId = null, inMemoryRemainderText = null) {
     try {
         switch (type) {
             case 'sentiment':
@@ -46,10 +46,13 @@ export async function processFile(content, type, filepath, maxChunkLength = OPEN
             case 'chunk':
                 return await createChunks(content, maxChunkLength, filepath);
             case 'cleanAndChunk':
-                return await cleanAndChunkDocument(content, maxChunkLength, filepath, overview, skipMetadata, isContinuation, contentHash, previousDocumentId, inMemoryRemainderText);
+                return await cleanAndChunkDocument(content, maxChunkLength, filepath, overview, skipMetadata, isContinuation, groupNumber, previousDocumentId, inMemoryRemainderText);
             case 'fullMetadata_only':
                 // Save initial document
-                const document = await saveAnalysis(content, 'fullMetadata_only', { filepath });
+                const document = await saveAnalysis(content, 'fullMetadata_only', { 
+                    filepath,
+                    groupNumber  // Pass groupNumber separately, not as content_hash
+                });
                 
                 // Process metadata
                 const metadataResponse = await openai.chat.completions.create(
@@ -473,46 +476,34 @@ function findCompleteBoundary(text, position, word) {
 }
 
 /**
- * Main document processing function that cleans and chunks a document
- * 
- * This function handles the entire document processing workflow:
- * 1. Pre-chunking the document into manageable pieces
- * 2. Cleaning each pre-chunk to remove unwanted text
- * 3. Combining cleaned text with remainder from previous iterations
- * 4. Semantic chunking of the combined text
- * 5. Calculating new remainder text for next document
- * 
- * IMPORTANT CONCEPTS:
- * - Remainder text is text that wasn't included in semantic chunks and needs to be 
- *   carried forward to the next document or pre-chunk for processing
- * - Remainder text is maintained entirely in memory (no database storage)
- * - Remainder text is already cleaned and should never be cleaned again
- * 
- * @param {string} content - Raw document content
- * @param {number} maxChunkLength - Maximum length for semantic chunks
- * @param {string} filepath - Path to the original file (for reference)
- * @param {string} overview - Optional document overview
+ * Clean and chunk a document, preparing it for further processing
+ * @param {string} content - The raw document content
+ * @param {number} maxChunkLength - Maximum length for each chunk
+ * @param {string} filepath - Path to the original file
+ * @param {string} overview - Optional overview text to include
  * @param {boolean} skipMetadata - Whether to skip metadata generation
  * @param {boolean} isContinuation - Whether this document continues from a previous one
- * @param {string} contentHash - Optional content hash
+ * @param {string} groupNumber - Optional group number
  * @param {string} previousDocumentId - Deprecated - kept for backward compatibility
  * @param {string} inMemoryRemainderText - Remainder text from previous document (passed in memory)
  * @returns {Object} Processing results including chunks and warnings
  */
-async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview = '', skipMetadata = false, isContinuation = false, contentHash = null, previousDocumentId = null, inMemoryRemainderText = null) {
+async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview = '', skipMetadata = false, isContinuation = false, groupNumber = null, previousDocumentId = null, inMemoryRemainderText = null) {
     console.log('\n=== Starting Document Processing ===');
     console.log(`Total document length: ${content.length} characters`);
-    console.log(`Max chunk length: ${maxChunkLength} characters`);
-    console.log('=====================================\n');
-    
-    // Initialize remainder text - ONLY use in-memory tracking
+    console.log(`Continuation mode: ${isContinuation ? 'ON' : 'OFF'}`);
+    console.log(`Group number: ${groupNumber || 'none'}`);
+
+    // Track remainder text for each pre-chunk
     let remainderText = '';
-    
+
     // If we have in-memory remainder text, use it directly
     if (isContinuation && inMemoryRemainderText !== null) {
         console.log('Using in-memory remainder text from previous document');
+        console.log(`Remainder length: ${inMemoryRemainderText.length} characters`);
+        
+        // Initialize with previous remainder
         remainderText = inMemoryRemainderText;
-        console.log(`Remainder text length: ${remainderText.length} chars`);
         if (remainderText.length > 0) {
             console.log(`First 50 chars: "${remainderText.substring(0, Math.min(50, remainderText.length))}"`);
             console.log("REMAINDER-TRACK: Initialized with in-memory remainder");
@@ -527,9 +518,10 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
     // Save initial document with the raw content hash
     const document = await saveAnalysis(content, skipMetadata ? 'cleanAndChunk' : 'fullMetadata_only', { 
         filepath,
-        content_hash: contentHash
+        groupNumber  // Make sure groupNumber is passed correctly
     });
     console.log('Saved original document with ID:', document.id);
+    console.log('Using group number:', groupNumber || 'none');
 
     // Create new session for this document
     const currentSession = {
@@ -961,24 +953,37 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         console.log('No remainder text');
     }
 
-    // Store processed document in Supabase - store remainder text in raw_llm_response for reference
-    const { error: documentError } = await supabase
-        .from('documents')
-        .update({
-            raw_llm_response: remainderText, // Store remainder text for reference only
-            status: 'processed',
-            updated_at: new Date().toISOString()
-        })
-        .eq('id', document.id);
-
-    if (documentError) {
-        console.error('Error storing processed document:', documentError);
+    // At the end of function, update the document with chunks and remainder text
+    // This replaces the second saveAnalysis call that was in index.mjs
+    try {
+        // Update the document with the processed chunks and remainder
+        await saveAnalysis(content, skipMetadata ? 'cleanAndChunk' : 'fullMetadata_only', {
+            warnings: finalChunkResult.warnings || [],
+            groupNumber: groupNumber,  // Make sure to include group number again
+            chunks: finalChunkResult.chunks || [],
+            document_source_id: document.document_source_id,
+            document: document,  // Pass the document to update instead of creating new
+            filepath: filepath
+        });
+        
+        // Also make sure the raw_llm_response has the remainder text
+        await supabase
+            .from('documents')
+            .update({
+                raw_llm_response: remainderText,
+                status: 'processed',
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', document.id);
+            
+        console.log(`Updated document ${document.id} with ${finalChunkResult.chunks.length} chunks and remainder`);
+    } catch (error) {
+        console.error('Error updating document with chunks:', error);
     }
-
-    // Return the chunks and remainder text for continuation
+    
     return {
         chunks: finalChunkResult.chunks,
-        remainderText: remainderText, // This is critical for document continuation
+        remainderText: remainderText,
         warnings: finalChunkResult.warnings
     };
 }

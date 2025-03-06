@@ -120,4 +120,71 @@ When troubleshooting chunking issues:
 
 - **Missing Remainder**: Check if remainder is being correctly carried forward
 - **Text Removal Issues**: Verify if the cleaning process is removing important text
-- **Boundary Mismatches**: Ensure chunk boundaries align with semantic breaks 
+- **Boundary Mismatches**: Ensure chunk boundaries align with semantic breaks
+
+## Database and Storage
+
+### Document Storage Process
+
+Documents are saved in the database in one place only - inside the openaiService.mjs cleanAndChunkDocument function:
+
+1. **Initial Document Save**: At the start of document processing
+   - Creates a new document record with `status: 'pending'`
+   - Sets the content hash based on document content
+   - Creates a document_sources record with the group_number
+   - Returns the document ID for later reference
+
+2. **Final Update**: After processing is complete (also in cleanAndChunkDocument)
+   - Saves all chunks to the database
+   - Updates the existing document record
+   - Sets `status: 'processed'` 
+   - Stores the remainder text in `raw_llm_response` field
+
+```javascript
+// Initial save in cleanAndChunkDocument function
+const document = await saveAnalysis(content, skipMetadata ? 'cleanAndChunk' : 'fullMetadata_only', { 
+    filepath,
+    groupNumber  // Group number for organization purposes
+});
+
+// Final update with chunks (also in cleanAndChunkDocument)
+await saveAnalysis(content, skipMetadata ? 'cleanAndChunk' : 'fullMetadata_only', {
+    warnings: finalChunkResult.warnings || [],
+    groupNumber: groupNumber,  // Include group number again
+    chunks: finalChunkResult.chunks || [],
+    document_source_id: document.document_source_id,
+    document: document,  // Pass the document to update instead of creating new
+    filepath: filepath
+});
+
+// Update document status and remainder text
+await supabase
+    .from('documents')
+    .update({
+        raw_llm_response: remainderText,
+        status: 'processed',
+        updated_at: new Date().toISOString()
+    })
+    .eq('id', document.id);
+```
+
+### Group Parameter Usage
+
+The `groupNumber` parameter is used to organize related documents:
+
+1. It should be passed separately from `content_hash`
+2. It gets stored in the `group_number` field in the `document_sources` table
+3. It must be included in both the initial save and the chunk update
+4. It should never be stored in the `content_hash` field of the documents table
+
+**Important**: The group number is passed in both database operations to ensure proper document organization.
+
+### Content Hash
+
+The content hash serves a different purpose:
+
+1. It's calculated based on the document content
+2. It's used for deduplication detection
+3. It should only be updated when the document content changes
+
+The system now correctly separates these concerns to prevent duplicate records. 
