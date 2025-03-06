@@ -476,6 +476,133 @@ function findCompleteBoundary(text, position, word) {
 }
 
 /**
+ * Finds the actual position of a word in text, with sophisticated matching
+ * 
+ * This function is critical for accurate chunk boundary detection. When the LLM 
+ * provides positions, they may not exactly match the actual text. This function:
+ * 1. Tries exact matches first within a tolerance range
+ * 2. Falls back to fuzzy matching for similar words 
+ * 3. Uses different strategies for start vs. end positions
+ * 4. Ensures positions are valid and within text bounds
+ * 
+ * @param {string} text - The text to search in
+ * @param {string} targetWord - The word to find 
+ * @param {number} nearPosition - Approximate position where word should be
+ * @param {boolean} isStart - Whether this is a start position (vs. end)
+ * @param {number} previousChunkEnd - Position of previous chunk end, if any
+ * @returns {number} The best position found for the word
+ */
+function findWordPosition(text, targetWord, nearPosition, isStart, previousChunkEnd = 0) {
+    // Safety check inputs
+    if (!targetWord || targetWord.length === 0) {
+        console.log(`Warning: Empty target word provided`);
+        return isStart ? previousChunkEnd : nearPosition;
+    }
+    
+    // Ensure nearPosition is within text bounds
+    console.log(`\nfindWordPosition input values:`);
+    console.log(`- Target word: "${targetWord}"`);
+    console.log(`- Original nearPosition: ${nearPosition}`);
+    console.log(`- Text length: ${text.length}`);
+    console.log(`- Previous chunk end: ${previousChunkEnd}`);
+    
+    const origNearPosition = nearPosition;  // Store original for logging
+    nearPosition = Math.min(Math.max(0, nearPosition), text.length);
+    if (nearPosition !== origNearPosition) {
+        console.log(`- nearPosition adjusted to: ${nearPosition} (was: ${origNearPosition})`);
+    }
+    
+    // Define search range with tolerance
+    const searchStart = Math.max(0, nearPosition - tolerance);
+    const searchEnd = Math.min(text.length, nearPosition + tolerance);
+    console.log(`- Search range: ${searchStart}-${searchEnd}`);
+    
+    // If search bounds are invalid, use safe position
+    if (searchStart >= searchEnd) {
+        const result = isStart ? previousChunkEnd : Math.max(nearPosition, previousChunkEnd + 1);
+        console.log(`- Invalid search bounds (${searchStart} >= ${searchEnd})`);
+        console.log(`- Using fallback position: ${result}`);
+        return result;
+    }
+    
+    const searchArea = text.substring(searchStart, searchEnd);
+    console.log(`- Search area length: ${searchArea.length}`);
+    
+    // Try exact match first
+    const exactIndex = searchArea.indexOf(targetWord);
+    if (exactIndex !== -1) {
+        const foundPosition = searchStart + exactIndex;
+        console.log(`Found exact match "${targetWord}" at position ${foundPosition}`);
+        return foundPosition;
+    }
+    console.log(`- No exact match found`);
+
+    // Try searching in a wider area if first search failed
+    const widerStart = Math.max(0, nearPosition - tolerance * 2);
+    const widerEnd = Math.min(text.length, nearPosition + tolerance * 2);
+    const widerArea = text.substring(widerStart, widerEnd);
+    console.log(`\nTrying wider search: ${widerStart}-${widerEnd}`);
+    
+    const words = widerArea.split(/\s+/);
+    let bestMatch = null;
+    let bestMatchIndex = -1;
+    let bestMatchDifference = Infinity;
+
+    for (let i = 0; i < words.length; i++) {
+        const word = words[i];
+        if (Math.abs(word.length - targetWord.length) <= 1) {
+            let differences = 0;
+            const minLength = Math.min(word.length, targetWord.length);
+            for (let j = 0; j < minLength; j++) {
+                if (word[j] !== targetWord[j]) differences++;
+                if (differences > 1) break;
+            }
+            
+            if (differences <= 1 && differences < bestMatchDifference) {
+                bestMatch = word;
+                bestMatchDifference = differences;
+                const wordPos = widerArea.indexOf(word);
+                if (wordPos !== -1) {
+                    bestMatchIndex = widerStart + wordPos;
+                }
+            }
+        }
+    }
+
+    if (bestMatchIndex !== -1) {
+        console.log(`Found fuzzy match "${bestMatch}" for target "${targetWord}" at position ${bestMatchIndex}`);
+        return bestMatchIndex;
+    }
+
+    // If no match found, use suggested position but ensure it's valid
+    console.log(`No match found for "${targetWord}" near ${nearPosition}`);
+    if (isStart) {
+        // For start positions, use the suggested position but ensure it's after previous chunk
+        const safeStart = Math.max(nearPosition, previousChunkEnd);
+        console.log(`Using safe start position: ${safeStart}`);
+        return safeStart;
+    } else {
+        // For end positions:
+        // 1. Calculate intended length from original near position
+        // 2. Ensure we're after the start position
+        // 3. Stay within text bounds
+        // 4. Never collapse to start
+        const intendedLength = nearPosition - previousChunkEnd;
+        console.log(`Intended length from near position: ${intendedLength}`);
+        
+        // Ensure we're at least one character after start and preserve some length
+        const minLength = Math.max(50, intendedLength);  // At least 50 chars or intended length
+        const safeEnd = Math.min(
+            text.length,
+            Math.max(previousChunkEnd + minLength, nearPosition)
+        );
+        
+        console.log(`Using safe end position: ${safeEnd} (minLength: ${minLength})`);
+        return safeEnd;
+    }
+}
+
+/**
  * Clean and chunk a document, preparing it for further processing
  * @param {string} content - The raw document content
  * @param {number} maxChunkLength - Maximum length for each chunk
@@ -523,6 +650,21 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
     console.log('Saved original document with ID:', document.id);
     console.log('Using group number:', groupNumber || 'none');
 
+    // Inspect document structure 
+    console.log('\n========== DOCUMENT STRUCTURE CHECK ==========');
+    console.log('document object type:', typeof document);
+    console.log('document properties:', Object.keys(document));
+    console.log('document.id:', document.id);
+    console.log('document.document_source_id:', document.document_source_id);
+    // Check if document is correctly formed
+    if (!document.id) {
+        console.error('⚠️ WARNING: document.id is missing!');
+    }
+    if (!document.document_source_id) {
+        console.error('⚠️ WARNING: document.document_source_id is missing!');
+    }
+    console.log('========== END DOCUMENT STRUCTURE CHECK ==========\n');
+
     // Create new session for this document
     const currentSession = {
         messages: [],
@@ -557,24 +699,61 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         console.log(`Current remainder before processing (${remainderText.length} chars): "${remainderText.slice(0, Math.min(30, remainderText.length))}${remainderText.length > 30 ? '...' : ''}"`);
         
         // Save this pre-chunk to database (before any processing)
-        const { error: prechunkError } = await supabase
-            .from('prechunks')
-            .insert({
+        console.log(`Saving pre-chunk ${i + 1} with document_id=${document.id}`);
+        
+        // Make sure we have the required document ID
+        if (!document.id) {
+            console.error('Error: Missing document.id - cannot save pre-chunk');
+            continue; // Skip saving this pre-chunk but continue processing
+        }
+        
+        try {
+            // Ensure values are in the correct format
+            const prechunkData = {
                 document_id: document.id,
                 chunk_index: i,
-                text: chunk.text,
-                start_position: chunk.startPosition,
-                end_position: chunk.endPosition,
+                text: chunk.text || '',
+                start_position: parseInt(chunk.startPosition) || 0,
+                end_position: parseInt(chunk.endPosition) || 0,
                 is_complete: Boolean(chunk.isComplete),
                 created_at: new Date().toISOString(),
-                remainder_text: remainderText,
-                remainder_length: remainderText.length
+                remainder_text: remainderText || '',
+                remainder_length: (remainderText || '').length
+            };
+            
+            // Double check all values are valid
+            Object.entries(prechunkData).forEach(([key, value]) => {
+                if (value === undefined || value === null) {
+                    console.error(`Warning: ${key} is ${value} in prechunk`);
+                    
+                    // Provide safe defaults
+                    if (key === 'text' || key === 'remainder_text') {
+                        prechunkData[key] = '';
+                    } else if (key === 'start_position' || key === 'end_position' || key === 'remainder_length') {
+                        prechunkData[key] = 0;
+                    } else if (key === 'is_complete') {
+                        prechunkData[key] = false;
+                    }
+                }
             });
+            
+            const { error: prechunkError } = await supabase
+                .from('prechunks')
+                .insert(prechunkData);
 
         if (prechunkError) {
             console.error(`Error saving pre-chunk ${i + 1}:`, prechunkError);
+            if (prechunkError.details) {
+                console.error(`Error details: ${prechunkError.details}`);
+            }
+            if (prechunkError.hint) {
+                console.error(`Error hint: ${prechunkError.hint}`);
+            }
         } else {
-            console.log(`Saved pre-chunk ${i + 1} to database`);
+            console.log(`Saved pre-chunk ${i + 1} to database successfully`);
+            }
+        } catch (err) {
+            console.error(`Exception saving pre-chunk ${i + 1}:`, err);
         }
 
         /**
@@ -878,10 +1057,90 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
 
         if (parsedResponse.chunks) {
             console.log(`Number of chunks returned: ${parsedResponse.chunks.length}`);
-            parsedResponse.chunks.forEach((c, index) => {
+            // Process chunks to ensure they have text content and accurate positions
+            let cumulativeOffset = 0;  // Track position adjustments
+            let previousAdjustedEnd = 0;  // Track end of previous chunk
+            
+            parsedResponse.chunks = parsedResponse.chunks.map((chunk, index) => {
                 console.log(`\nChunk ${index + 1}:`);
-                console.log(`Start: ${c.startIndex}, End: ${c.endIndex}`);
-                console.log(`Text: ${c.cleanedText || "No text provided"}`);
+                console.log(`Original: Start: ${chunk.startIndex}, End: ${chunk.endIndex}`);
+                
+                // Apply cumulative offset from previous chunks if available
+                const offsetAdjustedStartIndex = chunk.startIndex + cumulativeOffset - 1; // Convert to 0-indexed
+                const offsetAdjustedEndIndex = chunk.endIndex + cumulativeOffset - 1;  // Convert to 0-indexed
+                
+                console.log(`After offset adjustment: Start: ${offsetAdjustedStartIndex+1}, End: ${offsetAdjustedEndIndex+1}`);
+                
+                // Extract first and last words for boundary detection
+                if (chunk.cleanedText && chunk.cleanedText.trim().length > 0) {
+                    // Get words from the cleanedText
+                    const words = chunk.cleanedText.trim().split(/\s+/);
+                    chunk.firstWord = words.length > 0 ? words[0] : '';
+                    chunk.lastWord = words.length > 0 ? words[words.length - 1] : '';
+                    console.log(`Words detected - First: "${chunk.firstWord}", Last: "${chunk.lastWord}"`);
+                }
+                
+                // Use the word boundary detection to get accurate positions
+                if (chunk.firstWord && chunk.lastWord) {
+                    // Use offset-adjusted positions as the starting point for word search
+                    const suggestedStartIndex = offsetAdjustedStartIndex;
+                    const suggestedEndIndex = offsetAdjustedEndIndex;
+                    
+                    // Adjust positions based on actual word locations
+                    const adjustedStartIndex = findWordPosition(
+                        finalCleanedText, 
+                        chunk.firstWord, 
+                        suggestedStartIndex, 
+                        true, 
+                        previousAdjustedEnd
+                    );
+                    
+                    const adjustedEndIndex = findWordPosition(
+                        finalCleanedText, 
+                        chunk.lastWord, 
+                        suggestedEndIndex, 
+                        false, 
+                        adjustedStartIndex
+                    );
+                    
+                    // Update with adjusted positions (convert back to 1-indexed)
+                    chunk.adjustedStartIndex = adjustedStartIndex + 1;
+                    chunk.adjustedEndIndex = adjustedEndIndex + 1;
+                    previousAdjustedEnd = adjustedEndIndex;
+                    
+                    // Calculate new cumulative offset for next chunks
+                    // This tracks drift between LLM's position calculations and actual text
+                    const newOffset = adjustedEndIndex - (chunk.endIndex - 1);  // Compare to original end position
+                    console.log(`Position drift: ${newOffset} characters from LLM's calculation`);
+                    cumulativeOffset = newOffset;  // Update for next chunk
+                    
+                    // If positions were adjusted, re-extract the text
+                    if (adjustedStartIndex !== suggestedStartIndex || adjustedEndIndex !== suggestedEndIndex) {
+                        console.log(`Positions adjusted: ${suggestedStartIndex+1}-${suggestedEndIndex+1} -> ${chunk.adjustedStartIndex}-${chunk.adjustedEndIndex}`);
+                        
+                        // Re-extract the text with adjusted positions
+                        if (adjustedStartIndex < adjustedEndIndex && adjustedEndIndex <= finalCleanedText.length) {
+                            chunk.cleanedText = finalCleanedText.substring(adjustedStartIndex, adjustedEndIndex);
+                            console.log(`Re-extracted text with adjusted boundaries`);
+                        }
+                    }
+                } else if (!chunk.cleanedText && chunk.startIndex && chunk.endIndex) {
+                    // If no cleanedText but position info exists
+                    // Fix positions if needed to ensure valid extraction
+                    const start = Math.max(0, chunk.startIndex - 1); // Convert 1-indexed to 0-indexed
+                    const end = Math.min(finalCleanedText.length, chunk.endIndex);
+                    
+                    if (start < end && end <= finalCleanedText.length) {
+                        chunk.cleanedText = finalCleanedText.substring(start, end);
+                        console.log(`Extracted text from positions: "${chunk.cleanedText.substring(0, 30)}..."`);
+                    } else {
+                        console.error(`Invalid chunk positions: start=${chunk.startIndex}, end=${chunk.endIndex}`);
+                        chunk.cleanedText = ''; // Empty string to avoid null/undefined
+                    }
+                }
+                
+                console.log(`Final text: ${chunk.cleanedText ? chunk.cleanedText.substring(0, 30) + "..." : "No text provided"}`);
+                return chunk;
             });
         } else {
             // If LLM didn't return chunks, treat entire cleaned text as remainder
@@ -918,8 +1177,10 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         if (lastChunk && !lastChunk.drop_remaining) {
             // Only update remainderText if the last processed chunk is valid
             // Get everything after the last chunk's end index
-            remainderText = finalCleanedText.substring(lastChunk.endIndex);
-            console.log(`[TRACK] UPDATED: remainderText = text after last chunk (${lastChunk.endIndex} to end)`);
+            // Use adjustedEndIndex if available, fall back to endIndex
+            const endPosition = (lastChunk.adjustedEndIndex || lastChunk.endIndex) - 1; // Convert to 0-indexed
+            remainderText = finalCleanedText.substring(endPosition);
+            console.log(`[TRACK] UPDATED: remainderText = text after last chunk (${endPosition} to end)`);
             console.log(`[TRACK] new remainderText length: ${remainderText.length} chars`);
             
             // Log the first 50 characters of the remainder for debugging
@@ -956,40 +1217,7 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
     // At the end of function, update the document with chunks and remainder text
     // This replaces the second saveAnalysis call that was in index.mjs
     try {
-        // Don't call saveAnalysis again - just directly update the document and save chunks
-
-        // 1. Save the chunks directly
-        if (finalChunkResult.chunks && finalChunkResult.chunks.length > 0) {
-            console.log(`Saving ${finalChunkResult.chunks.length} chunks...`);
-            
-            const chunksToInsert = finalChunkResult.chunks
-                .filter(chunk => chunk.cleanedText && chunk.cleanedText.trim().length > 0)
-                .map(chunk => ({
-                    document_id: document.id,
-                    document_source_id: document.document_source_id,
-                    start_index: chunk.startIndex,
-                    end_index: chunk.endIndex,
-                    cleaned_text: chunk.cleanedText.trim(),
-                    original_text: chunk.originalText || content.slice(chunk.startIndex - 1, chunk.endIndex),
-                    warnings: Array.isArray(chunk.warnings) ? chunk.warnings.join('\n') : chunk.warnings,
-                    created_at: new Date().toISOString(),
-                    updated_at: new Date().toISOString()
-                }));
-
-            if (chunksToInsert.length > 0) {
-                const { error: chunksError } = await supabase
-                    .from('chunks')
-                    .insert(chunksToInsert);
-
-                if (chunksError) {
-                    console.error('Error saving chunks:', chunksError);
-                } else {
-                    console.log(`${chunksToInsert.length} chunks saved successfully`);
-                }
-            }
-        }
-        
-        // 2. Update the document status (do NOT store remainder text in database)
+        // Update the document status (do NOT store remainder text in database)
         await supabase
             .from('documents')
             .update({
@@ -999,6 +1227,82 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
             })
             .eq('id', document.id);
             
+        // Process and save chunks with document source ID
+        if (finalChunkResult.chunks && finalChunkResult.chunks.length > 0) {
+            console.log(`\n========== FINAL CHUNK PROCESSING DIAGNOSTICS ==========`);
+            console.log(`Processing ${finalChunkResult.chunks.length} chunks for database insertion...`);
+            console.log(`Document ID: ${document?.id || 'MISSING!'}`);
+            console.log(`Document Source ID: ${document?.document_source_id || 'MISSING!'}`);
+            
+            // Detailed check of first chunk
+            if (finalChunkResult.chunks.length > 0) {
+                const sampleChunk = finalChunkResult.chunks[0];
+                console.log(`Sample chunk before processing:`, {
+                    startIndex: sampleChunk.startIndex,
+                    endIndex: sampleChunk.endIndex,
+                    cleanedText: sampleChunk.cleanedText?.substring(0, 30) + '...',
+                    hasWarnings: (sampleChunk.warnings && sampleChunk.warnings.length > 0) ? 'YES' : 'NO'
+                });
+            }
+            
+            // Add first_word and last_word fields and prepare for insertion
+            const chunksToSave = finalChunkResult.chunks.map(chunk => {
+                // Get the first and last word for the chunk
+                const cleanedText = chunk.cleanedText?.trim() || '';
+                const words = cleanedText.split(/\s+/).filter(w => w.length > 0);
+                const firstWord = words.length > 0 ? words[0] : '';
+                const lastWord = words.length > 0 ? words[words.length - 1] : '';
+                
+                console.log(`Chunk text stats: length=${cleanedText.length}, words=${words.length}, first=${firstWord}, last=${lastWord}`);
+                
+                return {
+                    ...chunk,
+                    // Use adjusted positions if available, otherwise use original
+                    startIndex: chunk.adjustedStartIndex || chunk.startIndex,
+                    endIndex: chunk.adjustedEndIndex || chunk.endIndex,
+                    firstWord,
+                    lastWord
+                };
+            });
+            
+            console.log(`After processing: ${chunksToSave.length} chunks ready for saveAnalysis`);
+            
+            // Display first chunk that will be saved
+            if (chunksToSave.length > 0) {
+                console.log(`First chunk to save (after processing):`, {
+                    startIndex: chunksToSave[0].startIndex,
+                    endIndex: chunksToSave[0].endIndex,
+                    firstWord: chunksToSave[0].firstWord,
+                    lastWord: chunksToSave[0].lastWord,
+                    cleanedTextLength: chunksToSave[0].cleanedText?.length || 0
+                });
+            }
+            
+            // Save via saveAnalysis
+            try {
+                console.log(`Calling saveAnalysis with 'chunk_direct_save' type, ${chunksToSave.length} chunks`);
+                console.log(`Document source ID being passed: ${document.document_source_id}`);
+                
+                await saveAnalysis(content, 'chunk_direct_save', {
+                    document: document,
+                    document_source_id: document.document_source_id,
+                    chunks: chunksToSave
+                });
+                console.log(`✅ saveAnalysis call completed for ${chunksToSave.length} chunks`);
+            } catch (chunkError) {
+                console.error('🚨 ERROR: Failed to save chunks via saveAnalysis:', chunkError);
+                if (chunkError.code) {
+                    console.error('Error code:', chunkError.code);
+                }
+                if (chunkError.details) {
+                    console.error('Error details:', chunkError.details);
+                }
+            }
+            console.log(`========== END CHUNK PROCESSING DIAGNOSTICS ==========`);
+        } else {
+            console.log('No chunks to save to database');
+        }
+        
         console.log(`Updated document ${document.id} with ${finalChunkResult.chunks.length} chunks (remainder text kept in memory only)`);
     } catch (error) {
         console.error('Error updating document with chunks:', error);

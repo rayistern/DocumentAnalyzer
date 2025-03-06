@@ -17,6 +17,8 @@ export async function saveAnalysis(content, type, metadata = {}) {
         let documentSourceId;
         let document;
         
+        console.log(`saveAnalysis called with type: ${type}, filepath: ${metadata.filepath || 'none'}, groupNumber: ${metadata.groupNumber || 'none'}`);
+        
         // For initial document processing or skipped duplicates, create source record
         if (type === 'cleanAndChunk' || type === 'fullMetadata_only' || type === 'skipped_duplicate') {
             const { data: sourceData, error: sourceError } = await supabase
@@ -30,11 +32,15 @@ export async function saveAnalysis(content, type, metadata = {}) {
                 .select()
                 .single();
                 
-            if (sourceError) throw sourceError;
+            if (sourceError) {
+                console.error('Error creating document_source:', sourceError);
+                throw sourceError;
+            }
             documentSourceId = sourceData.id;
+            console.log(`Created document_source with ID: ${documentSourceId}`);
 
-            // Calculate content hash if not provided
-            const contentHash = metadata.content_hash || calculateContentHash(content);
+            // Calculate content hash
+            const contentHash = calculateContentHash(content);
 
             // Save initial document
             const { data: docData, error: docError } = await supabase
@@ -52,8 +58,12 @@ export async function saveAnalysis(content, type, metadata = {}) {
                 .select()
                 .single();
 
-            if (docError) throw docError;
+            if (docError) {
+                console.error('Error creating document:', docError);
+                throw docError;
+            }
             document = docData;
+            console.log(`Created document with ID: ${document.id}, document_source_id: ${document.document_source_id}`);
         } else if (metadata.document_source_id) {
             // For chunk processing, use existing document source id
             documentSourceId = metadata.document_source_id;
@@ -62,35 +72,137 @@ export async function saveAnalysis(content, type, metadata = {}) {
             throw new Error('Invalid operation type or missing document source id');
         }
 
-        // Process and save chunks if present
-        if (metadata.chunks && metadata.chunks.length > 0) {
-            console.log(`Saving ${metadata.chunks.length} chunks...`);
+        // Check if document_source_id is available - if not, try to get it directly
+        if (!documentSourceId && document && document.id) {
+            console.log(`⚠️ WARNING: Missing documentSourceId but have document.id - trying to fetch documentSourceId`);
+            try {
+                const { data, error } = await supabase
+                    .from('documents')
+                    .select('document_source_id')
+                    .eq('id', document.id)
+                    .single();
+                
+                if (error) {
+                    console.error('Error fetching document_source_id:', error);
+                } else if (data && data.document_source_id) {
+                    console.log(`🔄 Retrieved document_source_id: ${data.document_source_id} for document ${document.id}`);
+                    documentSourceId = data.document_source_id;
+                } else {
+                    console.error('❌ Could not retrieve document_source_id from database');
+                }
+            } catch (fetchError) {
+                console.error('Error during document_source_id fetch:', fetchError);
+            }
+        }
+
+        // For chunks, save with source reference
+        if (metadata.chunks && !metadata.skipChunkSave) {
+            console.log(`========== CHUNK SAVING DIAGNOSTICS ==========`);
+            console.log(`Attempting to save ${metadata.chunks.length} chunks via saveAnalysis call`);
+            console.log(`Document ID: ${document?.id || 'MISSING!'}`);
+            console.log(`Document Source ID: ${documentSourceId || 'MISSING!'}`);
+            
+            // Check input chunks
+            if (metadata.chunks.length > 0) {
+                console.log(`Sample input chunk:`, {
+                    startIndex: metadata.chunks[0].startIndex,
+                    endIndex: metadata.chunks[0].endIndex,
+                    cleanedText: metadata.chunks[0].cleanedText?.substring(0, 50) + '...',
+                    firstWord: metadata.chunks[0].firstWord,
+                    lastWord: metadata.chunks[0].lastWord,
+                    textLength: metadata.chunks[0].cleanedText?.length || 0
+                });
+            }
             
             const chunksToInsert = metadata.chunks
-                .filter(chunk => chunk.cleanedText && chunk.cleanedText.trim().length > 0)  // Filter out empty chunks
-                .map(chunk => ({
-                    document_id: document.id,
-                    document_source_id: documentSourceId,
-                    start_index: chunk.startIndex,
-                    end_index: chunk.endIndex,
-                    cleaned_text: chunk.cleanedText.trim(),
-                    original_text: chunk.originalText || content.slice(chunk.startIndex - 1, chunk.endIndex),
-                    warnings: Array.isArray(chunk.warnings) ? chunk.warnings.join('\n') : chunk.warnings,
-                    created_at: new Date().toISOString(),
-                    updated_at: new Date().toISOString()
-                }));
+                .filter(chunk => {
+                    // More robust filtering logic
+                    const hasText = chunk.cleanedText && chunk.cleanedText.trim().length > 0;
+                    if (!hasText) {
+                        console.log(`⚠️ Filtered out chunk: startIndex=${chunk.startIndex}, endIndex=${chunk.endIndex} (no valid text content)`);
+                    }
+                    return hasText;
+                })
+                .map(chunk => {
+                    // Additional position validation logging
+                    const startIndex = chunk.startIndex || 0;
+                    const endIndex = chunk.endIndex || 0;
+                    
+                    if (startIndex >= endIndex) {
+                        console.log(`⚠️ Warning: Invalid chunk positions (start=${startIndex} >= end=${endIndex})`);
+                    }
+                    
+                    if (!chunk.firstWord || !chunk.lastWord) {
+                        console.log(`⚠️ Warning: Missing boundary words for chunk ${startIndex}-${endIndex}`);
+                    }
+                    
+                    const chunkData = {
+                        document_id: document.id,
+                        document_source_id: documentSourceId,
+                        start_index: startIndex,
+                        end_index: endIndex,
+                        first_word: chunk.firstWord,
+                        last_word: chunk.lastWord,
+                        cleaned_text: (chunk.cleanedText || '').trim(),
+                        original_text: content.slice(Math.max(0, startIndex - 1), Math.min(content.length, endIndex)),
+                        warnings: Array.isArray(chunk.warnings) ? chunk.warnings.join('\n') : chunk.warnings,
+                        raw_metadata: chunk.metadata || null,
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString()
+                    };
+                    
+                    // Validate all fields
+                    Object.entries(chunkData).forEach(([key, value]) => {
+                        if (value === undefined || value === null) {
+                            console.error(`⚠️ WARNING: Field "${key}" is ${value} in chunk data`);
+                        }
+                    });
+                    
+                    return chunkData;
+                });
 
+            console.log(`After filtering/processing: ${chunksToInsert.length} chunks ready to insert`);
+            
             if (chunksToInsert.length > 0) {
-                const { error: chunksError } = await supabase
-                    .from('chunks')
-                    .insert(chunksToInsert);
+                console.log(`First chunk to insert:`, {
+                    document_id: chunksToInsert[0].document_id,
+                    document_source_id: chunksToInsert[0].document_source_id,
+                    start_index: chunksToInsert[0].start_index,
+                    end_index: chunksToInsert[0].end_index,
+                    first_word: chunksToInsert[0].first_word,
+                    last_word: chunksToInsert[0].last_word,
+                    text_length: chunksToInsert[0].cleaned_text?.length || 0
+                });
+                
+                try {
+                    const { data, error: chunksError } = await supabase
+                        .from('chunks')
+                        .insert(chunksToInsert)
+                        .select();
 
-                if (chunksError) {
-                    console.error('Error saving chunks:', chunksError);
-                } else {
-                    console.log(`${chunksToInsert.length} chunks saved successfully`);
+                    if (chunksError) {
+                        console.error('🚨 ERROR saving chunks in saveAnalysis:', chunksError);
+                        console.error('Error code:', chunksError.code);
+                        console.error('Error details:', chunksError.details);
+                        console.error('Error hint:', chunksError.hint);
+                        throw chunksError;
+                    } else {
+                        console.log(`✅ SUCCESS: ${chunksToInsert.length} chunks saved successfully from saveAnalysis call`);
+                        if (data) {
+                            console.log(`Returned data: ${data.length} rows`);
+                        }
+                    }
+                } catch (insertError) {
+                    console.error('🚨 EXCEPTION during chunk insert:', insertError);
+                    if (insertError.code) {
+                        console.error(`SQL Error Code: ${insertError.code}`);
+                    }
+                    throw insertError;
                 }
+            } else {
+                console.log('⚠️ No valid chunks to insert after filtering');
             }
+            console.log(`========== END CHUNK DIAGNOSTICS ==========`);
         }
 
         // Update source status when cleaned content is ready
@@ -105,10 +217,10 @@ export async function saveAnalysis(content, type, metadata = {}) {
 
             if (updateError) {
                 console.error('Error updating document source:', updateError);
+                throw updateError;
             }
         }
-        
-        // Return the document with ID for tracking in batch processing
+
         return document;
     } catch (error) {
         console.error('Error in saveAnalysis:', error);
