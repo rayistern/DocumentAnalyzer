@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import { OPENAI_SETTINGS, OPENAI_PROMPTS } from '../config/settings.mjs';
 import { logLLMResponse } from './llmLoggingService.mjs';
-import { saveAnalysis, saveCleanedDocument } from './supabaseService.mjs';
+import { saveAnalysis, saveCleanedDocument, saveChunkMetadata } from './supabaseService.mjs';
 import { preChunkText, shouldUseSimplifiedPrompt } from './preChunkingService.mjs';
 import dotenv from 'dotenv'
 import { supabase } from './supabaseService.mjs';
@@ -1584,6 +1584,53 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                     chunks: chunksToSave
                 });
                 console.log(`✅ saveAnalysis call completed for ${chunksToSave.length} chunks`);
+                
+                // Process and save metadata for each chunk
+                if (!skipMetadata && chunksToSave.length > 0) {
+                    console.log(`\n========== CHUNK METADATA PROCESSING ==========`);
+                    console.log(`Generating metadata for ${chunksToSave.length} chunks...`);
+                    
+                    for (let i = 0; i < chunksToSave.length; i++) {
+                        const chunk = chunksToSave[i];
+                        console.log(`Processing metadata for chunk ${i+1}/${chunksToSave.length}`);
+                        
+                        try {
+                            // Only process chunks with actual content
+                            if (chunk.cleanedText && chunk.cleanedText.trim().length > 0) {
+                                // Generate metadata using the metadata prompt
+                                const metadataResponse = await openai.chat.completions.create(
+                                    createApiOptions(getModelForOperation('metadata'), [
+                                        OPENAI_PROMPTS.metadata(false),
+                                        {
+                                            role: "user",
+                                            content: chunk.cleanedText
+                                        }
+                                    ])
+                                );
+                                
+                                console.log(`Received metadata response for chunk ${i+1}`);
+                                const cleanedResponse = removeMarkdownFormatting(metadataResponse.choices[0].message.content);
+                                const metadata = parseJsonResponse(cleanedResponse);
+                                
+                                // Save the metadata
+                                await saveChunkMetadata(document.id, i, metadata);
+                                console.log(`✅ Saved metadata for chunk ${i+1}`);
+                            } else {
+                                console.log(`⚠️ Skipping metadata for chunk ${i+1} - no valid content`);
+                            }
+                        } catch (metadataError) {
+                            console.error(`Error processing metadata for chunk ${i+1}:`, metadataError);
+                            // Continue with next chunk even if this one fails
+                        }
+                        
+                        // Add a small delay between API calls to avoid rate limiting
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                    }
+                    
+                    console.log(`========== END CHUNK METADATA PROCESSING ==========`);
+                } else if (skipMetadata) {
+                    console.log(`Skipping metadata generation (skipMetadata=true)`);
+                }
             } catch (chunkError) {
                 console.error('🚨 ERROR: Failed to save chunks via saveAnalysis:', chunkError);
                 if (chunkError.code) {

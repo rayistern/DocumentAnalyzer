@@ -322,29 +322,56 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata) {
     try {
         console.log(`Saving metadata for document ${documentId}, chunk ${chunkIndex}...`);
         
+        // Map LLM response fields to database fields if needed
+        const mappedMetadata = {
+            long_summary: metadata.long_summary || metadata.longSummary,
+            short_summary: metadata.short_summary || metadata.shortSummary,
+            quiz_questions: metadata.quiz_questions || metadata.quizQuestions,
+            followup_thinking_questions: metadata.followup_thinking_questions || metadata.followupThinkingQuestions,
+            generated_title: metadata.generated_title || metadata.generatedTitle,
+            tags_he: metadata.tags_he || metadata.tagsHe,
+            key_terms_he: metadata.key_terms_he || metadata.keyTermsHe,
+            key_phrases_he: metadata.key_phrases_he || metadata.keyPhrasesHe,
+            key_phrases_en: metadata.key_phrases_en || metadata.keyPhrasesEn,
+            bibliography_snippets: metadata.bibliography_snippets || metadata.bibliographySnippets,
+            questions_explicit: metadata.questions_explicit || metadata.questionsExplicit,
+            questions_implied: metadata.questions_implied || metadata.questionsImplied,
+            reconciled_issues: metadata.reconciled_issues || metadata.reconciledIssues,
+            qa_pair: metadata.qa_pair || metadata.qaPair,
+            potential_typos: metadata.potential_typos || metadata.potentialTypos,
+            identified_abbreviations: metadata.identified_abbreviations || metadata.identifiedAbbreviations,
+            named_entities: metadata.named_entities || metadata.namedEntities
+        };
+        
+        console.log(`Mapped metadata fields for chunk ${chunkIndex}`);
+        
         // Convert arrays to Postgres array format
         const formattedMetadata = {
             document_id: documentId,
             chunk_index: chunkIndex,
-            long_summary: metadata.long_summary,
-            short_summary: metadata.short_summary,
-            quiz_questions: Array.isArray(metadata.quiz_questions) ? `{${metadata.quiz_questions.map(q => `"${q.replace(/"/g, '\\"')}"`).join(',')}}` : null,
-            followup_thinking_questions: Array.isArray(metadata.followup_thinking_questions) ? `{${metadata.followup_thinking_questions.map(q => `"${q.replace(/"/g, '\\"')}"`).join(',')}}` : null,
-            generated_title: metadata.generated_title,
-            tags_he: Array.isArray(metadata.tags_he) ? `{${metadata.tags_he.map(t => `"${t.replace(/"/g, '\\"')}"`).join(',')}}` : null,
-            key_terms_he: Array.isArray(metadata.key_terms_he) ? `{${metadata.key_terms_he.map(t => `"${t.replace(/"/g, '\\"')}"`).join(',')}}` : null,
-            key_phrases_he: Array.isArray(metadata.key_phrases_he) ? `{${metadata.key_phrases_he.map(p => `"${p.replace(/"/g, '\\"')}"`).join(',')}}` : null,
-            key_phrases_en: Array.isArray(metadata.key_phrases_en) ? `{${metadata.key_phrases_en.map(p => `"${p.replace(/"/g, '\\"')}"`).join(',')}}` : null,
-            bibliography_snippets: Array.isArray(metadata.bibliography_snippets) ? `{${metadata.bibliography_snippets.map(b => `"${JSON.stringify(b).replace(/"/g, '\\"')}"`).join(',')}}` : null,
-            questions_explicit: Array.isArray(metadata.questions_explicit) ? `{${metadata.questions_explicit.map(q => `"${q.replace(/"/g, '\\"')}"`).join(',')}}` : null,
-            questions_implied: Array.isArray(metadata.questions_implied) ? `{${metadata.questions_implied.map(q => `"${q.replace(/"/g, '\\"')}"`).join(',')}}` : null,
-            reconciled_issues: Array.isArray(metadata.reconciled_issues) ? `{${metadata.reconciled_issues.map(i => `"${i.replace(/"/g, '\\"')}"`).join(',')}}` : null,
-            qa_pair: metadata.qa_pair,
-            potential_typos: Array.isArray(metadata.potential_typos) ? `{${metadata.potential_typos.map(t => `"${t.replace(/"/g, '\\"')}"`).join(',')}}` : null,
-            identified_abbreviations: Array.isArray(metadata.identified_abbreviations) ? `{${metadata.identified_abbreviations.map(a => `"${a.replace(/"/g, '\\"')}"`).join(',')}}` : null,
-            named_entities: Array.isArray(metadata.named_entities) ? `{${metadata.named_entities.map(e => `"${e.replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            long_summary: mappedMetadata.long_summary,
+            short_summary: mappedMetadata.short_summary,
+            quiz_questions: Array.isArray(mappedMetadata.quiz_questions) ? `{${mappedMetadata.quiz_questions.map(q => `"${q.replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            followup_thinking_questions: Array.isArray(mappedMetadata.followup_thinking_questions) ? `{${mappedMetadata.followup_thinking_questions.map(q => `"${q.replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            generated_title: mappedMetadata.generated_title,
+            tags_he: Array.isArray(mappedMetadata.tags_he) ? `{${mappedMetadata.tags_he.map(t => `"${t.replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            key_terms_he: Array.isArray(mappedMetadata.key_terms_he) ? `{${mappedMetadata.key_terms_he.map(t => `"${t.replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            key_phrases_he: Array.isArray(mappedMetadata.key_phrases_he) ? `{${mappedMetadata.key_phrases_he.map(p => `"${p.replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            key_phrases_en: Array.isArray(mappedMetadata.key_phrases_en) ? `{${mappedMetadata.key_phrases_en.map(p => `"${p.replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            bibliography_snippets: Array.isArray(mappedMetadata.bibliography_snippets) ? `{${mappedMetadata.bibliography_snippets.map(b => `"${JSON.stringify(b).replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            questions_explicit: Array.isArray(mappedMetadata.questions_explicit) ? `{${mappedMetadata.questions_explicit.map(q => `"${q.replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            questions_implied: Array.isArray(mappedMetadata.questions_implied) ? `{${mappedMetadata.questions_implied.map(q => `"${q.replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            reconciled_issues: Array.isArray(mappedMetadata.reconciled_issues) ? `{${mappedMetadata.reconciled_issues.map(i => `"${i.replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            qa_pair: mappedMetadata.qa_pair,
+            potential_typos: Array.isArray(mappedMetadata.potential_typos) ? `{${mappedMetadata.potential_typos.map(t => `"${t.replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            identified_abbreviations: Array.isArray(mappedMetadata.identified_abbreviations) ? `{${mappedMetadata.identified_abbreviations.map(a => `"${a.replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            named_entities: Array.isArray(mappedMetadata.named_entities) ? `{${mappedMetadata.named_entities.map(e => `"${e.replace(/"/g, '\\"')}"`).join(',')}}` : null,
             created_at: new Date().toISOString()
         };
+
+        // Log metadata fields before saving
+        console.log(`Preparing to save metadata for chunk ${chunkIndex} with fields:`, 
+            Object.keys(formattedMetadata).filter(k => formattedMetadata[k] !== null).join(', '));
 
         const { error } = await supabase
             .from('chunk_metadata')
