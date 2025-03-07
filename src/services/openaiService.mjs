@@ -170,7 +170,8 @@ function isSimilarEnough(str1, str2, maxDistance = 2) {
 function cleanText(text, textToRemove) {
     // Normalize quotation marks in the input text
     const normalizeQuotes = (str) => str.replace(/[""]/g, '"').replace(/['']/g, "'");
-    let cleanedText = normalizeQuotes(text);
+    // First strip diacritics from the entire input text
+    let cleanedText = stripDiacritics(normalizeQuotes(text));
     const tolerance = OPENAI_SETTINGS.textRemovalPositionTolerance;
     let offset = 0;  // Track how many characters we've removed
 
@@ -186,8 +187,8 @@ function cleanText(text, textToRemove) {
 
             // Try exact position first with similarity check
             const exactText = cleanedText.substring(adjustedStart, adjustedEnd);
-            const strippedExactText = stripDiacritics(exactText);
-            const exactSimilarity = isSimilarEnough(strippedExactText, normalizedItemText);
+            // No need to strip diacritics again since cleanedText is already stripped
+            const exactSimilarity = isSimilarEnough(exactText, normalizedItemText);
             
             if (exactSimilarity.isSimilar) {
                 found = true;
@@ -238,8 +239,8 @@ function cleanText(text, textToRemove) {
             // If position-based approaches fail, try context matching
             if (!found && item.contextBefore && item.contextAfter) {
                 const pattern = escapeRegExp(stripDiacritics(item.contextBefore + item.text + item.contextAfter));
-                const strippedCleanedText = stripDiacritics(cleanedText);
-                const match = strippedCleanedText.match(new RegExp(pattern));
+                // No need to strip diacritics again since cleanedText is already stripped
+                const match = cleanedText.match(new RegExp(pattern));
                 if (match) {
                     found = true;
                     const matchStart = match.index + stripDiacritics(item.contextBefore).length;
@@ -253,8 +254,8 @@ function cleanText(text, textToRemove) {
                     const beforePattern = escapeRegExp(stripDiacritics(item.contextBefore + item.text));
                     const afterPattern = escapeRegExp(stripDiacritics(item.text + item.contextAfter));
                     
-                    const beforeMatch = strippedCleanedText.match(new RegExp(beforePattern));
-                    const afterMatch = strippedCleanedText.match(new RegExp(afterPattern));
+                    const beforeMatch = cleanedText.match(new RegExp(beforePattern));
+                    const afterMatch = cleanedText.match(new RegExp(afterPattern));
                     
                     if (beforeMatch) {
                         found = true;
@@ -278,10 +279,10 @@ function cleanText(text, textToRemove) {
 
             // Last resort: if all else fails and text appears exactly once
             if (!found) {
-                const strippedCleanedText = stripDiacritics(cleanedText);
-                const matches = strippedCleanedText.match(new RegExp(escapeRegExp(normalizedItemText), 'g'));
+                // No need to strip diacritics again since cleanedText is already stripped
+                const matches = cleanedText.match(new RegExp(escapeRegExp(normalizedItemText), 'g'));
                 if (matches && matches.length === 1) {
-                    const matchStart = strippedCleanedText.indexOf(normalizedItemText);
+                    const matchStart = cleanedText.indexOf(normalizedItemText);
                     const originalLength = cleanedText.substring(matchStart, matchStart + item.text.length).length;
                     cleanedText = cleanedText.substring(0, matchStart) + 
                                 cleanedText.substring(matchStart + originalLength);
@@ -464,8 +465,9 @@ function findCompleteBoundary(text, position, word) {
     // Look for the word within tolerance range
     const start = Math.max(0, position - tolerance);
     const end = Math.min(text.length, position + tolerance);
-    const searchText = normalizeQuotes(text.substring(start, end));
-    const normalizedWord = normalizeQuotes(word);
+    // Strip diacritics from both search text and word
+    const searchText = stripDiacritics(normalizeQuotes(text.substring(start, end)));
+    const normalizedWord = stripDiacritics(normalizeQuotes(word));
     
     const wordIndex = searchText.indexOf(normalizedWord);
     if (wordIndex !== -1) {
@@ -1172,18 +1174,33 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                     console.log(`Chunk ${i+1}: startIndex=${chunk.startIndex}, endIndex=${chunk.endIndex}, length=${chunk.endIndex - chunk.startIndex}`);
                 });
                 
-                // Important: If any chunks have positions but no cleanedText, ensure we extract text by position
+                // Log the full response
+                console.log(`\n========== FULL RAW LLM RESPONSE ==========`);
+                console.log(rawChunkResponse);
+                console.log(`========== END FULL RAW RESPONSE ==========\n`);
+
+                // Extract text for all chunks
                 for (const chunk of parsedResponse.chunks) {
-                    if (!chunk.cleanedText && chunk.startIndex && chunk.endIndex) {
-                        // Valid positions but no text means we should extract text ourselves
-                        const start = Math.max(0, chunk.startIndex - 1); // Convert 1-indexed to 0-indexed
+                    // Always extract text based on positions
+                    if (chunk.startIndex !== undefined && chunk.endIndex !== undefined) {
+                        const start = Math.max(0, chunk.startIndex); // 0-indexed positions
                         const end = Math.min(finalCleanedText.length, chunk.endIndex);
                         
                         if (start < end && end <= finalCleanedText.length) {
-                            // Extract text using positions directly
                             chunk.cleanedText = finalCleanedText.substring(start, end);
                             console.log(`Extracted text for position ${start}-${end}, length=${chunk.cleanedText.length}`);
+                            console.log(`Text sample: "${chunk.cleanedText.substring(0, Math.min(50, chunk.cleanedText.length))}..."`);
+                            
+                            // Map boundary phrases
+                            if (chunk.firstWords) chunk.firstWord = chunk.firstWords;
+                            if (chunk.lastWords) chunk.lastWord = chunk.lastWords;
+                        } else {
+                            console.error(`Invalid position range: ${start}-${end}`);
+                            chunk.cleanedText = '';
                         }
+                    } else {
+                        console.error(`Missing position information for chunk`);
+                        chunk.cleanedText = '';
                     }
                 }
             }

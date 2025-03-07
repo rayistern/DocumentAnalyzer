@@ -73,7 +73,7 @@ export const OPENAI_PROMPTS = {
             role: "user",
             content: `Segment this text into self-contained sections based on topic shifts. Each chunk should fully capture a concept but remain under ${maxChunkLength} characters - and the longer the better.
             ${isIncomplete ? ' (note: this text may be cut off at the end, please ignore any incomplete text and on our end we will prepend that to the upcoming text we send your way. Leave the end of the document "unchunked" and we will automatically see that.)' : ''}
-                - Record the exact first and last few words of each chunk for validation
+                - Record the exact first and last 2-3 words of each chunk for validation
                 - Each subsequent chunk MUST start right after the previous chunk's ending punctuation
                 - There MUST NOT be any gaps or overlaps between chunks
                 - Include all punctuation in the chunks
@@ -104,7 +104,7 @@ export const OPENAI_PROMPTS = {
     metadata: ( isIncomplete = false) => ({
         role: "user",
         content: `Analyze the given text chunk and provide detailed metadata in JSON format. Each piece of metadata needs to be self contained, not using ambiguous references like 'the text'. ${isIncomplete ? ' Take into account the relative position of the text chunk in the flow of the document.' : ''} Include:
-    - long_summary (1-2 paragraphs, in English. The audience is familiar with the domain.)
+    - long_summary (1-2 paragraphs, in English. The audience is familiar with the domain, leverage transliterated Hebrew terminology for domain specific terms.)
     - short_summary (1-2 sentences, in English)
     - quiz_questions (3-5 questions in English. Make sure these can be used standalone and do not ambiguously reference the text.)
     - followup_thinking_questions (2-3 deeper analytical questions, in English)
@@ -117,7 +117,7 @@ export const OPENAI_PROMPTS = {
     - questions_explicit (directly stated in text, Original Hebrew)
     - questions_implied (suggested by the content, English)
     - reconciled_issues (how the text resolves contradictions, English)
-    - qa_pair (One Q&A pair: implied question which the text answers, not a question about the text. This will be used for future training. Please output a thorough, specific, long form answer, the way an LLM should respond conversationally. Include only information that is explicitly stated in the text, and only that information which answers the question.)
+    - qa_pair (An implied question which the text addresses. This Q&A pair will be used for future training, so please imagine it as a user's question having not seen the text at all. Provide a thorough, structured, long-form response in a conversational LLM style. The response should be well-organized, beginning with a brief summary, followed by structured key points or explanations, and concluding with a strong takeaway or final insight. Include only information that is stated in the text, and only that information which answers the question.)
     - potential_typos (array of possible errors, Original Hebrew)
     - identified_abbreviations (array of abbreviations with expansions, Original Hebrew)
     - named_entities (array of people, places, texts mentioned, Original Hebrew)

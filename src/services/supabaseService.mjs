@@ -358,13 +358,13 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata) {
             key_terms_he: Array.isArray(mappedMetadata.key_terms_he) ? `{${mappedMetadata.key_terms_he.map(t => `"${t.replace(/"/g, '\\"')}"`).join(',')}}` : null,
             key_phrases_he: Array.isArray(mappedMetadata.key_phrases_he) ? `{${mappedMetadata.key_phrases_he.map(p => `"${p.replace(/"/g, '\\"')}"`).join(',')}}` : null,
             key_phrases_en: Array.isArray(mappedMetadata.key_phrases_en) ? `{${mappedMetadata.key_phrases_en.map(p => `"${p.replace(/"/g, '\\"')}"`).join(',')}}` : null,
-            bibliography_snippets: Array.isArray(mappedMetadata.bibliography_snippets) ? `{${mappedMetadata.bibliography_snippets.map(b => `"${JSON.stringify(b).replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            bibliography_snippets: mappedMetadata.bibliography_snippets ? JSON.stringify(mappedMetadata.bibliography_snippets) : null,
             questions_explicit: Array.isArray(mappedMetadata.questions_explicit) ? `{${mappedMetadata.questions_explicit.map(q => `"${q.replace(/"/g, '\\"')}"`).join(',')}}` : null,
             questions_implied: Array.isArray(mappedMetadata.questions_implied) ? `{${mappedMetadata.questions_implied.map(q => `"${q.replace(/"/g, '\\"')}"`).join(',')}}` : null,
             reconciled_issues: Array.isArray(mappedMetadata.reconciled_issues) ? `{${mappedMetadata.reconciled_issues.map(i => `"${i.replace(/"/g, '\\"')}"`).join(',')}}` : null,
-            qa_pair: mappedMetadata.qa_pair,
+            qa_pair: mappedMetadata.qa_pair ? JSON.stringify(mappedMetadata.qa_pair) : null,
             potential_typos: Array.isArray(mappedMetadata.potential_typos) ? `{${mappedMetadata.potential_typos.map(t => `"${t.replace(/"/g, '\\"')}"`).join(',')}}` : null,
-            identified_abbreviations: Array.isArray(mappedMetadata.identified_abbreviations) ? `{${mappedMetadata.identified_abbreviations.map(a => `"${a.replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            identified_abbreviations: mappedMetadata.identified_abbreviations ? JSON.stringify(mappedMetadata.identified_abbreviations) : null,
             named_entities: Array.isArray(mappedMetadata.named_entities) ? `{${mappedMetadata.named_entities.map(e => `"${e.replace(/"/g, '\\"')}"`).join(',')}}` : null,
             created_at: new Date().toISOString()
         };
