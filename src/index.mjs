@@ -4,7 +4,7 @@ import { Command } from 'commander';
 import dotenv from 'dotenv';
 import { processFile, batchProcessFullMetadata } from './services/openaiService.mjs';
 import { readTextFile } from './utils/fileReader.mjs';
-import { getAnalysisByType, logAllDocumentSources, detectUnexpectedEntries } from './services/supabaseService.mjs';
+import { getAnalysisByType, logAllDocumentSources, detectUnexpectedEntries, checkForDatabaseTriggers, checkForRecentActivity } from './services/supabaseService.mjs';
 import { glob } from 'glob';
 import path from 'path';
 import { convertToText } from './utils/documentConverter.mjs';
@@ -137,6 +137,12 @@ program
             
             // Check for any unexpected entries before starting
             await detectUnexpectedEntries(null);
+            
+            // Check for any database triggers
+            await checkForDatabaseTriggers();
+            
+            // Check for recent database activity
+            await checkForRecentActivity();
             
             // Log current document_sources entries
             await logAllDocumentSources();

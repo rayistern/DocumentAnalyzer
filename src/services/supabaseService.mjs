@@ -134,11 +134,78 @@ export async function detectUnexpectedEntries(expectedFilename) {
                 console.log(`[${timestamp}] ${index+1}. ID: ${entry.id.substring(0, 8)}... | Filename: ${entry.filename} | Status: ${entry.status} | Group: ${entry.group_number || 'none'} | Created: ${entry.created_at}`);
             });
             console.log(`[${timestamp}] These entries may have been created by another process or by an unexpected code path.`);
+            
+            // Check for specific patterns in the unexpected entries
+            const suspiciousEntries = unexpectedEntries.filter(entry => 
+                entry.group_number && 
+                entry.group_number.includes('igrosgpt4.5-1a') && 
+                !entry.group_number.includes('test')
+            );
+            
+            if (suspiciousEntries.length > 0) {
+                console.log(`\n[${timestamp}] 🚨 CRITICAL ALERT: Found ${suspiciousEntries.length} entries with suspicious group numbers:`);
+                suspiciousEntries.forEach((entry, index) => {
+                    console.log(`[${timestamp}] ${index+1}. ID: ${entry.id.substring(0, 8)}... | Filename: ${entry.filename} | Group: ${entry.group_number}`);
+                });
+                console.log(`[${timestamp}] These entries match the pattern of the unexpected entries you're seeing.`);
+                console.log(`[${timestamp}] This suggests there might be a database trigger or another process creating these entries.`);
+                
+                // Log a stack trace to help identify where this is being called from
+                console.log(`[${timestamp}] Current call stack:`);
+                console.log(new Error().stack);
+            }
         } else {
             console.log(`[${timestamp}] ✅ No unexpected entries found.`);
         }
     } catch (error) {
         console.error(`[${timestamp}] ❌ Error detecting unexpected entries:`, error);
+    }
+}
+
+// Add a function to check for database triggers
+export async function checkForDatabaseTriggers() {
+    const timestamp = new Date().toISOString();
+    console.log(`\n[${timestamp}] 🔍 CHECKING FOR DATABASE TRIGGERS`);
+    
+    try {
+        // Query for triggers in the database
+        const { data, error } = await supabase.rpc('list_triggers');
+        
+        if (error) {
+            console.error(`[${timestamp}] ❌ Error checking for triggers:`, error);
+            console.log(`[${timestamp}] This database may not have the list_triggers function. Creating a simple query to check...`);
+            
+            // Try a simpler query to check for triggers
+            const { data: pgData, error: pgError } = await supabase
+                .from('pg_trigger')
+                .select('*')
+                .limit(10);
+                
+            if (pgError) {
+                console.error(`[${timestamp}] ❌ Error querying pg_trigger:`, pgError);
+                console.log(`[${timestamp}] Unable to check for triggers directly. Please check your database configuration.`);
+            } else if (pgData && pgData.length > 0) {
+                console.log(`[${timestamp}] ⚠️ Found ${pgData.length} triggers in the database:`);
+                pgData.forEach((trigger, index) => {
+                    console.log(`[${timestamp}] ${index+1}. Trigger: ${JSON.stringify(trigger)}`);
+                });
+            } else {
+                console.log(`[${timestamp}] ✅ No triggers found in pg_trigger.`);
+            }
+            
+            return;
+        }
+        
+        if (data && data.length > 0) {
+            console.log(`[${timestamp}] ⚠️ Found ${data.length} triggers in the database:`);
+            data.forEach((trigger, index) => {
+                console.log(`[${timestamp}] ${index+1}. Trigger: ${JSON.stringify(trigger)}`);
+            });
+        } else {
+            console.log(`[${timestamp}] ✅ No triggers found.`);
+        }
+    } catch (error) {
+        console.error(`[${timestamp}] ❌ Error checking for triggers:`, error);
     }
 }
 
@@ -580,5 +647,69 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata) {
         console.error('Database error:', error.message);
         console.error('Full error:', JSON.stringify(error, null, 2));
         throw error;
+    }
+}
+
+// Add a function to check for recent database activity
+export async function checkForRecentActivity() {
+    const timestamp = new Date().toISOString();
+    console.log(`\n[${timestamp}] 🔍 CHECKING FOR RECENT DATABASE ACTIVITY`);
+    
+    try {
+        // Get the last 20 entries from document_sources
+        const { data: sourceData, error: sourceError } = await supabase
+            .from('document_sources')
+            .select('id, filename, status, group_number, created_at')
+            .order('created_at', { ascending: false })
+            .limit(20);
+            
+        if (sourceError) {
+            console.error(`[${timestamp}] ❌ Error fetching recent document_sources:`, sourceError);
+            return;
+        }
+        
+        // Group entries by group_number
+        const groupedEntries = {};
+        sourceData.forEach(entry => {
+            const group = entry.group_number || 'none';
+            if (!groupedEntries[group]) {
+                groupedEntries[group] = [];
+            }
+            groupedEntries[group].push(entry);
+        });
+        
+        console.log(`[${timestamp}] Recent activity by group:`);
+        Object.keys(groupedEntries).forEach(group => {
+            const entries = groupedEntries[group];
+            console.log(`[${timestamp}] Group: ${group} - ${entries.length} entries`);
+            
+            // Check if there are very recent entries (last 5 minutes)
+            const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+            const recentEntries = entries.filter(entry => entry.created_at > fiveMinutesAgo);
+            
+            if (recentEntries.length > 0) {
+                console.log(`[${timestamp}] ⚠️ Found ${recentEntries.length} very recent entries (last 5 minutes) in group ${group}:`);
+                recentEntries.forEach((entry, index) => {
+                    console.log(`[${timestamp}]   ${index+1}. ID: ${entry.id.substring(0, 8)}... | Filename: ${entry.filename} | Created: ${entry.created_at}`);
+                });
+                console.log(`[${timestamp}] This suggests there might be another process running with group: ${group}`);
+            }
+        });
+        
+        // Check for suspicious patterns
+        const suspiciousGroups = Object.keys(groupedEntries).filter(group => 
+            group.includes('igrosgpt4.5-1a') && !group.includes('test')
+        );
+        
+        if (suspiciousGroups.length > 0) {
+            console.log(`\n[${timestamp}] 🚨 CRITICAL ALERT: Found activity in suspicious groups:`);
+            suspiciousGroups.forEach(group => {
+                console.log(`[${timestamp}] Group: ${group} - ${groupedEntries[group].length} entries`);
+            });
+            console.log(`[${timestamp}] These groups match the pattern of the unexpected entries you're seeing.`);
+            console.log(`[${timestamp}] This suggests there might be another process running with these groups.`);
+        }
+    } catch (error) {
+        console.error(`[${timestamp}] ❌ Error checking for recent activity:`, error);
     }
 }

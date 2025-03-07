@@ -40,6 +40,17 @@ function getModelForOperation(operation) {
 
 export async function processFile(content, type, filepath, maxChunkLength = OPENAI_SETTINGS.defaultMaxChunkLength, overview = '', skipMetadata = false, isContinuation = false, groupNumber = null, previousDocumentId = null, inMemoryRemainderText = null) {
     try {
+        // Add a check for the group number to prevent processing files with unexpected group numbers
+        if (groupNumber && groupNumber.includes('igrosgpt4.5-1a') && !groupNumber.includes('test')) {
+            console.log(`\n[${new Date().toISOString()}] ⚠️ WARNING: Detected potential issue with group number: ${groupNumber}`);
+            console.log(`[${new Date().toISOString()}] This group number matches the pattern of unexpected entries.`);
+            console.log(`[${new Date().toISOString()}] Please check if this is the intended group number.`);
+            
+            // Log a stack trace to see where this call is coming from
+            console.log(`[${new Date().toISOString()}] Call stack:`);
+            console.log(new Error().stack);
+        }
+        
         switch (type) {
             case 'sentiment':
                 return await analyzeSentiment(content);
