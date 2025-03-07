@@ -4,7 +4,7 @@ import { Command } from 'commander';
 import dotenv from 'dotenv';
 import { processFile, batchProcessFullMetadata } from './services/openaiService.mjs';
 import { readTextFile } from './utils/fileReader.mjs';
-import { getAnalysisByType, logAllDocumentSources } from './services/supabaseService.mjs';
+import { getAnalysisByType, logAllDocumentSources, detectUnexpectedEntries } from './services/supabaseService.mjs';
 import { glob } from 'glob';
 import path from 'path';
 import { convertToText } from './utils/documentConverter.mjs';
@@ -86,6 +86,8 @@ program
     .option('--previousDocumentId <id>', 'ID of the previous document to use for continuation')
     .option('-g, --group <n>', 'group name for the documents')
     .option('--reverse', 'process files in reverse order')
+    .option('--delay <ms>', 'delay in milliseconds between processing files', '2000')
+    .option('--local-only', 'only use local files, ignore database for file selection', false)
     .action(async (pattern, options) => {
         try {
             const files = await glob(pattern);
@@ -101,7 +103,8 @@ program
 
             // If continuing from last processed, get the last document
             let startFromFile = null;
-            if (options.continue) {
+            if (options.continue && !options.localOnly) {
+                console.log('Looking up last processed document from database...');
                 const lastDoc = await getLastProcessedDocument();
                 if (lastDoc) {
                     startFromFile = path.basename(lastDoc.filename);
@@ -123,6 +126,17 @@ program
             console.log(`[${new Date().toISOString()}] Processing type: ${options.type}`);
             console.log(`[${new Date().toISOString()}] Group: ${options.group || 'none'}`);
             console.log(`[${new Date().toISOString()}] Skip metadata: ${options.skipMetadata ? 'true' : 'false'}`);
+            console.log(`[${new Date().toISOString()}] Delay between files: ${options.delay}ms`);
+            console.log(`[${new Date().toISOString()}] Local only mode: ${options.localOnly ? 'ON' : 'OFF'}`);
+            
+            if (!options.localOnly) {
+                console.log(`\n[${new Date().toISOString()}] ⚠️ WARNING: Local-only mode is OFF. The system will check the database for existing files.`);
+                console.log(`[${new Date().toISOString()}] This may cause unexpected behavior if there are files in the database with the same names as local files.`);
+                console.log(`[${new Date().toISOString()}] To process only local files, use the --local-only flag.\n`);
+            }
+            
+            // Check for any unexpected entries before starting
+            await detectUnexpectedEntries(null);
             
             // Log current document_sources entries
             await logAllDocumentSources();
@@ -130,6 +144,9 @@ program
             // Track file processing sequence
             let fileCounter = 0;
             const totalFiles = files.length;
+            
+            // Helper function to delay execution
+            const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
             
             for (const file of files) {
                 try {
@@ -151,7 +168,9 @@ program
                     
                     // Check if file exists in document_sources
                     console.log(`[${processTimestamp}] Checking if document exists in database...`);
-                    const exists = await checkDocumentExists(filename, options.reprocessIncomplete, options.group);
+                    const exists = options.localOnly 
+                        ? false // Skip database check in local-only mode
+                        : await checkDocumentExists(filename, options.reprocessIncomplete, options.group);
                     if (exists) {
                         console.log(`[${processTimestamp}] Skipping ${filename} - already processed in group ${options.group}`);
                         continue;
@@ -199,13 +218,30 @@ program
                         console.log(`[${processTimestamp}] Stored remainder text for next file (${remainderText.length} chars)`);
                     }
                     
+                    // Check for any unexpected entries that might have been created during processing
+                    await detectUnexpectedEntries(filename);
+                    
                     // Log document_sources after processing to track changes
                     await logAllDocumentSources();
+                    
+                    // Add delay between files to prevent race conditions
+                    if (fileCounter < totalFiles) {
+                        const delayMs = parseInt(options.delay);
+                        console.log(`[${new Date().toISOString()}] 🕒 Waiting ${delayMs}ms before processing next file...`);
+                        await delay(delayMs);
+                    }
                 } catch (error) {
                     const errorTimestamp = new Date().toISOString();
                     console.error(`[${errorTimestamp}] ❌ ERROR processing ${file}:`, error.message);
                     if (error.stack) {
                         console.error(`[${errorTimestamp}] Stack trace:`, error.stack);
+                    }
+                    
+                    // Add delay even after errors
+                    if (fileCounter < totalFiles) {
+                        const delayMs = parseInt(options.delay);
+                        console.log(`[${new Date().toISOString()}] 🕒 Waiting ${delayMs}ms before processing next file...`);
+                        await delay(delayMs);
                     }
                 }
             }

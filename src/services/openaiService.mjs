@@ -49,12 +49,18 @@ export async function processFile(content, type, filepath, maxChunkLength = OPEN
                 return await cleanAndChunkDocument(content, maxChunkLength, filepath, overview, skipMetadata, isContinuation, groupNumber, previousDocumentId, inMemoryRemainderText);
             case 'fullMetadata_only':
                 // Save initial document
+                console.log(`\n[${new Date().toISOString()}] 🔍 FULL METADATA ONLY PROCESSING START: ${filepath}`);
+                console.log(`[${new Date().toISOString()}] Group: ${groupNumber || 'none'}`);
+                
                 const document = await saveAnalysis(content, 'fullMetadata_only', { 
                     filepath,
                     groupNumber  // Pass groupNumber separately, not as content_hash
                 });
                 
+                console.log(`[${new Date().toISOString()}] ✅ Initial document saved with ID: ${document.id}`);
+                
                 // Process metadata
+                console.log(`[${new Date().toISOString()}] 🔄 Calling OpenAI API for metadata...`);
                 const metadataResponse = await openai.chat.completions.create(
                     createApiOptions(getModelForOperation('fullMetadata'), [
                         OPENAI_PROMPTS.cleanAndChunk.fullMetadata(overview),
@@ -64,6 +70,8 @@ export async function processFile(content, type, filepath, maxChunkLength = OPEN
                         }
                     ])
                 );
+                
+                console.log(`[${new Date().toISOString()}] ✅ Received OpenAI response for metadata`);
                 
                 // Store raw response and metadata
                 const cleanedResponse = removeMarkdownFormatting(metadataResponse.choices[0].message.content);
@@ -85,24 +93,31 @@ export async function processFile(content, type, filepath, maxChunkLength = OPEN
                 console.log(`[${updateTimestamp}] Filepath: ${filepath}`);
                 console.log(`[${updateTimestamp}] Group: ${groupNumber || 'none'}`);
                 
-                const { error: updateError } = await supabase
-                    .from('documents')
-                    .update({ 
-                        raw_llm_response: metadataResponse.choices[0].message.content,
-                        long_description: metadata.longDescription,
-                        keywords: metadata.keywords,
-                        questions_answered: metadata.questionsAnswered,
-                        api_metadata: apiMetadata,
-                        status: 'processed', // Add status update to mark as processed
-                        updated_at: new Date().toISOString()
-                    })
-                    .eq('id', document.id);
-                
-                if (updateError) {
-                    console.error(`[${updateTimestamp}] ❌ ERROR updating document ${document.id}:`, updateError);
-                } else {
-                    console.log(`[${updateTimestamp}] ✅ Successfully updated document ${document.id} with metadata and set status to 'processed'`);
+                try {
+                    const { error: updateError } = await supabase
+                        .from('documents')
+                        .update({ 
+                            raw_llm_response: metadataResponse.choices[0].message.content,
+                            long_description: metadata.longDescription,
+                            keywords: metadata.keywords,
+                            questions_answered: metadata.questionsAnswered,
+                            api_metadata: apiMetadata,
+                            status: 'processed', // Add status update to mark as processed
+                            updated_at: new Date().toISOString()
+                        })
+                        .eq('id', document.id);
+                    
+                    if (updateError) {
+                        console.error(`[${updateTimestamp}] ❌ ERROR updating document ${document.id}:`, updateError);
+                    } else {
+                        console.log(`[${updateTimestamp}] ✅ Successfully updated document ${document.id} with metadata and set status to 'processed'`);
+                    }
+                } catch (error) {
+                    console.error(`[${updateTimestamp}] ❌ EXCEPTION during document update:`, error);
+                    console.error(`[${updateTimestamp}] Stack trace:`, error.stack);
                 }
+                
+                console.log(`[${new Date().toISOString()}] 🏁 FULL METADATA ONLY PROCESSING COMPLETE: ${filepath}`);
                 
                 // Return a structure matching what cleanAndChunkDocument returns
                 return {
@@ -1621,14 +1636,16 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                     console.log(`\n========== CHUNK METADATA PROCESSING ==========`);
                     console.log(`Generating metadata for ${chunksToSave.length} chunks...`);
                     
+                    // Process chunks sequentially to avoid out-of-order issues
                     for (let i = 0; i < chunksToSave.length; i++) {
                         const chunk = chunksToSave[i];
-                        console.log(`Processing metadata for chunk ${i+1}/${chunksToSave.length}`);
+                        console.log(`\n----- Processing metadata for chunk ${i+1}/${chunksToSave.length} -----`);
                         
                         try {
                             // Only process chunks with actual content
                             if (chunk.cleanedText && chunk.cleanedText.trim().length > 0) {
                                 // Generate metadata using the metadata prompt
+                                console.log(`Calling OpenAI API for chunk ${i+1} metadata...`);
                                 const metadataResponse = await openai.chat.completions.create(
                                     createApiOptions(getModelForOperation('metadata'), [
                                         OPENAI_PROMPTS.metadata(false),
@@ -1644,6 +1661,7 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                                 const metadata = parseJsonResponse(cleanedResponse);
                                 
                                 // Save the metadata
+                                console.log(`Saving metadata for chunk ${i+1}...`);
                                 await saveChunkMetadata(document.id, i, metadata);
                                 console.log(`✅ Saved metadata for chunk ${i+1}`);
                             } else {
@@ -1655,7 +1673,8 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                         }
                         
                         // Add a small delay between API calls to avoid rate limiting
-                        await new Promise(resolve => setTimeout(resolve, 500));
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        console.log(`----- Completed processing for chunk ${i+1}/${chunksToSave.length} -----`);
                     }
                     
                     console.log(`========== END CHUNK METADATA PROCESSING ==========`);
@@ -1714,6 +1733,12 @@ function debugLogText(label, text, isRemainder) {
 export async function batchProcessFullMetadata(documentIds) {
     console.log(`Processing metadata for ${documentIds.length} documents`);
     
+    // Import the detectUnexpectedEntries function
+    const { detectUnexpectedEntries } = await import('./supabaseService.mjs');
+    
+    // Check for any unexpected entries before starting
+    await detectUnexpectedEntries(null);
+    
     for (const docId of documentIds) {
         try {
             console.log(`Processing document ${docId}`);
@@ -1728,6 +1753,11 @@ export async function batchProcessFullMetadata(documentIds) {
             if (error) {
                 console.error(`Error fetching document ${docId}:`, error);
                 continue;
+            }
+            
+            // Check for any unexpected entries before processing this document
+            if (doc.original_filename) {
+                await detectUnexpectedEntries(doc.original_filename);
             }
             
             // Use the same approach as the 'fullMetadata_only' case in processFile
@@ -1772,6 +1802,11 @@ export async function batchProcessFullMetadata(documentIds) {
                 console.error(`Error updating document ${docId}:`, updateError);
             } else {
                 console.log(`Successfully processed metadata for document ${docId}`);
+            }
+            
+            // Check for any unexpected entries after processing this document
+            if (doc.original_filename) {
+                await detectUnexpectedEntries(doc.original_filename);
             }
         } catch (error) {
             console.error(`Error processing metadata for document ${docId}:`, error.message);

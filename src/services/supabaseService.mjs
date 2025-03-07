@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import dotenv from 'dotenv'
 import { parseJsonResponse } from '../utils/jsonUtils.mjs'
 import { calculateContentHash } from '../utils/deduplication.mjs'
+import path from 'path'
 
 dotenv.config()
 
@@ -33,6 +34,18 @@ export async function logAllDocumentSources() {
         data.forEach((entry, index) => {
             console.log(`[${timestamp}] ${index+1}. ID: ${entry.id.substring(0, 8)}... | Filename: ${entry.filename} | Status: ${entry.status} | Group: ${entry.group_number || 'none'} | Created: ${entry.created_at}`);
         });
+        
+        // Check for any entries created in the last 10 seconds
+        const tenSecondsAgo = new Date(Date.now() - 10 * 1000).toISOString();
+        const recentEntries = data.filter(entry => entry.created_at > tenSecondsAgo);
+        
+        if (recentEntries.length > 0) {
+            console.log(`\n[${timestamp}] ⚠️ ALERT: Found ${recentEntries.length} entries created in the last 10 seconds:`);
+            recentEntries.forEach((entry, index) => {
+                console.log(`[${timestamp}] ${index+1}. ID: ${entry.id.substring(0, 8)}... | Filename: ${entry.filename} | Status: ${entry.status} | Group: ${entry.group_number || 'none'} | Created: ${entry.created_at}`);
+            });
+            console.log(`[${timestamp}] These entries may have been created by another process or by an unexpected code path.`);
+        }
     } catch (error) {
         console.error(`[${timestamp}] ❌ Error logging document_sources:`, error);
     }
@@ -78,6 +91,57 @@ export async function checkForDuplicateEntries() {
     }
 }
 
+// Add a function to detect unexpected document entries
+export async function detectUnexpectedEntries(expectedFilename) {
+    const timestamp = new Date().toISOString();
+    console.log(`\n[${timestamp}] 🔍 CHECKING FOR UNEXPECTED ENTRIES`);
+    
+    try {
+        // Get the 5 most recent entries
+        const { data, error } = await supabase
+            .from('document_sources')
+            .select('id, filename, status, group_number, created_at')
+            .order('created_at', { ascending: false })
+            .limit(5);
+            
+        if (error) {
+            console.error(`[${timestamp}] ❌ Error fetching recent entries:`, error);
+            return;
+        }
+        
+        // Check if any entries don't match the expected filename
+        const unexpectedEntries = data.filter(entry => {
+            // If we're expecting a specific filename, filter for entries that don't match
+            if (expectedFilename) {
+                const baseExpectedFilename = expectedFilename.includes('/') || expectedFilename.includes('\\') 
+                    ? path.basename(expectedFilename) 
+                    : expectedFilename;
+                    
+                const baseEntryFilename = entry.filename.includes('/') || entry.filename.includes('\\') 
+                    ? path.basename(entry.filename) 
+                    : entry.filename;
+                    
+                return baseEntryFilename !== baseExpectedFilename;
+            }
+            
+            // If no expected filename, just return all entries
+            return true;
+        });
+        
+        if (unexpectedEntries.length > 0) {
+            console.log(`[${timestamp}] ⚠️ ALERT: Found ${unexpectedEntries.length} unexpected entries:`);
+            unexpectedEntries.forEach((entry, index) => {
+                console.log(`[${timestamp}] ${index+1}. ID: ${entry.id.substring(0, 8)}... | Filename: ${entry.filename} | Status: ${entry.status} | Group: ${entry.group_number || 'none'} | Created: ${entry.created_at}`);
+            });
+            console.log(`[${timestamp}] These entries may have been created by another process or by an unexpected code path.`);
+        } else {
+            console.log(`[${timestamp}] ✅ No unexpected entries found.`);
+        }
+    } catch (error) {
+        console.error(`[${timestamp}] ❌ Error detecting unexpected entries:`, error);
+    }
+}
+
 export async function saveAnalysis(content, type, metadata = {}) {
     try {
         let documentSourceId;
@@ -92,6 +156,31 @@ export async function saveAnalysis(content, type, metadata = {}) {
         console.log(`GroupNumber: ${metadata.groupNumber || 'none'}`);
         console.log(`Content length: ${content ? content.length : 0} chars`);
         console.log(`Call stack: ${stackTrace.split('\n').slice(1, 6).join('\n')}`);
+        
+        // Check if this file is already being processed by another instance
+        if (metadata.filepath && (type === 'cleanAndChunk' || type === 'fullMetadata_only')) {
+            const baseFilename = metadata.filepath.includes('/') || metadata.filepath.includes('\\') 
+                ? path.basename(metadata.filepath) 
+                : metadata.filepath;
+                
+            console.log(`[${timestamp}] 🔒 Checking for concurrent processing of ${baseFilename}...`);
+            
+            // Look for very recent entries (last 30 seconds) with this filename
+            const thirtySecondsAgo = new Date(Date.now() - 30 * 1000).toISOString();
+            const { data: recentData, error: recentError } = await supabase
+                .from('document_sources')
+                .select('id, filename, status, group_number, created_at')
+                .or(`filename.eq.${baseFilename},filename.ilike.%${baseFilename}`)
+                .gt('created_at', thirtySecondsAgo);
+                
+            if (!recentError && recentData?.length) {
+                console.log(`[${timestamp}] ⚠️ WARNING: Found ${recentData.length} very recent entries for this file (created in last 30 seconds):`);
+                recentData.forEach((doc, i) => {
+                    console.log(`[${timestamp}]   ${i+1}. ID: ${doc.id} | Filename: ${doc.filename} | Status: ${doc.status} | Group: ${doc.group_number || 'none'} | Created: ${doc.created_at}`);
+                });
+                console.log(`[${timestamp}] ⚠️ Possible concurrent processing detected - continuing but with caution`);
+            }
+        }
         
         // For initial document processing or skipped duplicates, create source record
         if (type === 'cleanAndChunk' || type === 'fullMetadata_only' || type === 'skipped_duplicate') {
@@ -406,6 +495,9 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata) {
     try {
         console.log(`Saving metadata for document ${documentId}, chunk ${chunkIndex}...`);
         
+        // Log the raw metadata for debugging
+        console.log(`Raw metadata for chunk ${chunkIndex}:`, JSON.stringify(metadata).substring(0, 200) + '...');
+        
         // Map LLM response fields to database fields if needed
         const mappedMetadata = {
             long_summary: metadata.long_summary || metadata.longSummary,
@@ -428,6 +520,25 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata) {
         
         console.log(`Mapped metadata fields for chunk ${chunkIndex}`);
         
+        // Special handling for qa_pair to ensure it's properly formatted
+        let qa_pair_value = null;
+        if (mappedMetadata.qa_pair) {
+            try {
+                // If it's already a string, parse it to validate and then re-stringify
+                if (typeof mappedMetadata.qa_pair === 'string') {
+                    const parsed = JSON.parse(mappedMetadata.qa_pair);
+                    qa_pair_value = JSON.stringify(parsed);
+                } else {
+                    // If it's an object, stringify it directly
+                    qa_pair_value = JSON.stringify(mappedMetadata.qa_pair);
+                }
+                console.log(`Formatted qa_pair for chunk ${chunkIndex}: ${qa_pair_value.substring(0, 100)}...`);
+            } catch (jsonError) {
+                console.error(`Error formatting qa_pair for chunk ${chunkIndex}:`, jsonError);
+                qa_pair_value = null;
+            }
+        }
+        
         // Convert arrays to Postgres array format
         const formattedMetadata = {
             document_id: documentId,
@@ -445,7 +556,7 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata) {
             questions_explicit: Array.isArray(mappedMetadata.questions_explicit) ? `{${mappedMetadata.questions_explicit.map(q => `"${q.replace(/"/g, '\\"')}"`).join(',')}}` : null,
             questions_implied: Array.isArray(mappedMetadata.questions_implied) ? `{${mappedMetadata.questions_implied.map(q => `"${q.replace(/"/g, '\\"')}"`).join(',')}}` : null,
             reconciled_issues: Array.isArray(mappedMetadata.reconciled_issues) ? `{${mappedMetadata.reconciled_issues.map(i => `"${i.replace(/"/g, '\\"')}"`).join(',')}}` : null,
-            qa_pair: mappedMetadata.qa_pair ? JSON.stringify(mappedMetadata.qa_pair) : null,
+            qa_pair: qa_pair_value, // Use our specially formatted qa_pair value
             potential_typos: Array.isArray(mappedMetadata.potential_typos) ? `{${mappedMetadata.potential_typos.map(t => `"${t.replace(/"/g, '\\"')}"`).join(',')}}` : null,
             named_entities: Array.isArray(mappedMetadata.named_entities) ? `{${mappedMetadata.named_entities.map(e => `"${e.replace(/"/g, '\\"')}"`).join(',')}}` : null,
             created_at: new Date().toISOString()
