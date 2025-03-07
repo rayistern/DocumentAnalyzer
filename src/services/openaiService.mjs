@@ -1030,13 +1030,42 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         // Log and parse LLM's chunking response
         console.log('\nLLM Response Analysis:');
         console.log('----------------------------------------');
+        
+        // Add detailed logging of raw LLM chunking response
+        console.log(`\n========== RAW LLM CHUNKING RESPONSE ==========`);
+        const rawChunkResponse = chunkResponse.choices[0].message.content;
+        console.log(`Response type: ${typeof rawChunkResponse}`);
+        console.log(`Raw response (first 500 chars): ${rawChunkResponse.substring(0, 500)}...`);
+        
         let parsedResponse;
         try {
-            parsedResponse = parseJsonResponse(removeMarkdownFormatting(chunkResponse.choices[0].message.content));
+            parsedResponse = parseJsonResponse(removeMarkdownFormatting(rawChunkResponse));
             // Ensure parsedResponse always has chunks array
             if (!parsedResponse.chunks) {
                 parsedResponse.chunks = [];
                 console.log("No chunks found in LLM response, initializing empty chunks array");
+            } else {
+                console.log(`\nNumber of chunks in raw response: ${parsedResponse.chunks.length}`);
+                // Log ALL chunks with their positions to diagnose the issue
+                console.log(`\n=== ALL CHUNK POSITIONS FROM LLM RESPONSE ===`);
+                parsedResponse.chunks.forEach((chunk, i) => {
+                    console.log(`Chunk ${i+1}: startIndex=${chunk.startIndex}, endIndex=${chunk.endIndex}, length=${chunk.endIndex - chunk.startIndex}`);
+                });
+                
+                // Important: If any chunks have positions but no cleanedText, ensure we extract text by position
+                for (const chunk of parsedResponse.chunks) {
+                    if (!chunk.cleanedText && chunk.startIndex && chunk.endIndex) {
+                        // Valid positions but no text means we should extract text ourselves
+                        const start = Math.max(0, chunk.startIndex - 1); // Convert 1-indexed to 0-indexed
+                        const end = Math.min(finalCleanedText.length, chunk.endIndex);
+                        
+                        if (start < end && end <= finalCleanedText.length) {
+                            // Extract text using positions directly
+                            chunk.cleanedText = finalCleanedText.substring(start, end);
+                            console.log(`Extracted text for position ${start}-${end}, length=${chunk.cleanedText.length}`);
+                        }
+                    }
+                }
             }
         } catch (parseError) {
             console.warn('Failed to parse chunk response as JSON:', parseError.message);
@@ -1111,6 +1140,12 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                     const suggestedStartIndex = offsetAdjustedStartIndex;
                     const suggestedEndIndex = offsetAdjustedEndIndex;
                     
+                    console.log(`\n======== WORD BOUNDARY DETECTION - CHUNK ${index + 1} ========`);
+                    console.log(`Finding exact word boundaries for precise chunking:`);
+                    console.log(`- First word to find: "${chunk.firstWord}"`);
+                    console.log(`- Last word to find: "${chunk.lastWord}"`);
+                    console.log(`- Starting search at positions: ${suggestedStartIndex+1}-${suggestedEndIndex+1}`);
+                    
                     // Adjust positions based on actual word locations
                     const adjustedStartIndex = findWordPosition(
                         finalCleanedText, 
@@ -1132,6 +1167,12 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                     chunk.adjustedStartIndex = adjustedStartIndex + 1;
                     chunk.adjustedEndIndex = adjustedEndIndex + 1;
                     previousAdjustedEnd = adjustedEndIndex;
+                    
+                    console.log(`\nWORD BOUNDARY RESULTS:`);
+                    console.log(`- Original positions: ${chunk.startIndex}-${chunk.endIndex}`);
+                    console.log(`- Final adjusted positions: ${chunk.adjustedStartIndex}-${chunk.adjustedEndIndex}`);
+                    console.log(`- Position change: start ${chunk.adjustedStartIndex - chunk.startIndex}, end ${chunk.adjustedEndIndex - chunk.endIndex}`);
+                    console.log(`======== END WORD BOUNDARY DETECTION ========\n`);
                     
                     /**
                      * CUMULATIVE OFFSET CALCULATION
@@ -1160,16 +1201,48 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                 } else if (!chunk.cleanedText && chunk.startIndex && chunk.endIndex) {
                     // If no cleanedText but position info exists
                     // Fix positions if needed to ensure valid extraction
+                    console.log(`\n⚠️ CHUNK HAS POSITIONS BUT NO TEXT - attempting to extract text from positions`);
+                    
+                    // Validate positions are within bounds
                     const start = Math.max(0, chunk.startIndex - 1); // Convert 1-indexed to 0-indexed
                     const end = Math.min(finalCleanedText.length, chunk.endIndex);
                     
-                    if (start < end && end <= finalCleanedText.length) {
-                        chunk.cleanedText = finalCleanedText.substring(start, end);
-                        console.log(`Extracted text from positions: "${chunk.cleanedText.substring(0, 30)}..."`);
-                    } else {
-                        console.error(`Invalid chunk positions: start=${chunk.startIndex}, end=${chunk.endIndex}`);
+                    console.log(`Extracting text from positions: ${start} to ${end} (length: ${end-start})`);
+                    console.log(`finalCleanedText length: ${finalCleanedText.length}`);
+                    
+                    if (start >= end) {
+                        console.error(`❌ Invalid position range: start(${start}) >= end(${end})`);
                         chunk.cleanedText = ''; // Empty string to avoid null/undefined
+                    } else if (start < 0 || end > finalCleanedText.length) {
+                        console.error(`❌ Out of bounds position: start(${start}), end(${end}), text length(${finalCleanedText.length})`);
+                        chunk.cleanedText = ''; // Empty string to avoid null/undefined
+                    } else {
+                        // Extract text using positions
+                        chunk.cleanedText = finalCleanedText.substring(start, end);
+                        
+                        // Check if we got valid text (not just whitespace)
+                        if (chunk.cleanedText.trim().length > 0) {
+                            console.log(`✅ Successfully extracted text (${chunk.cleanedText.length} chars)`);
+                            console.log(`Text sample: "${chunk.cleanedText.substring(0, Math.min(50, chunk.cleanedText.length))}..."`);
+                            
+                            // Extract first/last words
+                            const words = chunk.cleanedText.trim().split(/\s+/).filter(w => w.length > 0);
+                            chunk.firstWord = words.length > 0 ? words[0] : '';
+                            chunk.lastWord = words.length > 0 ? words[words.length - 1] : '';
+                            console.log(`Words detected - First: "${chunk.firstWord}", Last: "${chunk.lastWord}"`);
+                        } else {
+                            // Just use the text even if it's whitespace - don't filter it out here
+                            console.log(`⚠️ WARNING: Extracted text contains only whitespace`);
+                            console.log(`Raw text (hex): ${Array.from(chunk.cleanedText).map(c => c.charCodeAt(0).toString(16)).join(' ')}`);
+                            
+                            // Still set first/last word for debugging purposes
+                            chunk.firstWord = '';
+                            chunk.lastWord = '';
+                        }
                     }
+                } else if (!chunk.cleanedText) {
+                    console.error(`❌ Cannot extract text - chunk has no cleanedText and insufficient position data`);
+                    chunk.cleanedText = ''; // Empty string to avoid null/undefined
                 }
                 
                 console.log(`Final text: ${chunk.cleanedText ? chunk.cleanedText.substring(0, 30) + "..." : "No text provided"}`);

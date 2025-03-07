@@ -117,11 +117,31 @@ export async function saveAnalysis(content, type, metadata = {}) {
             const chunksToInsert = metadata.chunks
                 .filter(chunk => {
                     // More robust filtering logic
-                    const hasText = chunk.cleanedText && chunk.cleanedText.trim().length > 0;
-                    if (!hasText) {
-                        console.log(`⚠️ Filtered out chunk: startIndex=${chunk.startIndex}, endIndex=${chunk.endIndex} (no valid text content)`);
+                    if (!chunk.startIndex || !chunk.endIndex) {
+                        console.log(`⚠️ Filtered out chunk: missing position info`);
+                        return false;
                     }
-                    return hasText;
+                    
+                    // Check if positions are valid
+                    if (chunk.startIndex >= chunk.endIndex) {
+                        console.log(`⚠️ Filtered out chunk: startIndex=${chunk.startIndex} >= endIndex=${chunk.endIndex} (invalid positions)`);
+                        return false;
+                    }
+                    
+                    // Check if text is completely missing
+                    if (!chunk.cleanedText) {
+                        console.log(`⚠️ Filtered out chunk: startIndex=${chunk.startIndex}, endIndex=${chunk.endIndex} (completely missing text)`);
+                        return false;
+                    }
+                    
+                    // If text is only whitespace, log warning but keep the chunk
+                    if (chunk.cleanedText.trim().length === 0) {
+                        console.log(`⚠️ WARNING: Chunk contains only whitespace - positions: ${chunk.startIndex}-${chunk.endIndex}`);
+                        // Still include it but trim the whitespace
+                        chunk.cleanedText = '';
+                    }
+                    
+                    return true;
                 })
                 .map(chunk => {
                     // Additional position validation logging
@@ -147,8 +167,7 @@ export async function saveAnalysis(content, type, metadata = {}) {
                         original_text: content.slice(Math.max(0, startIndex - 1), Math.min(content.length, endIndex)),
                         warnings: Array.isArray(chunk.warnings) ? chunk.warnings.join('\n') : chunk.warnings,
                         raw_metadata: chunk.metadata || null,
-                        created_at: new Date().toISOString(),
-                        updated_at: new Date().toISOString()
+                        created_at: new Date().toISOString()
                     };
                     
                     // Validate all fields
