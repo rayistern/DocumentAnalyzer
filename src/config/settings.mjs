@@ -17,14 +17,33 @@ export const OPENAI_SETTINGS = {
         // Models to use for different operations
         operations: {
             clean: "gpt-4o-mini",
-            chunk: "gpt-4o-mini",
-            metadata: "gpt-4o-mini",
+            chunk: "o3-mini",
+            metadata: "gpt-4.5-preview",
             summarize: "gpt-4o-mini",
             sentiment: "gpt-4o-mini",
             fullMetadata: "gpt-4.5-preview"
         }
     }
 };
+
+// Global timeout setting in hours
+const GLOBAL_TIMEOUT_HOURS = 10;
+
+// Add automatic timeout function
+function setupProcessTimeout(hours = GLOBAL_TIMEOUT_HOURS) {
+    const timeoutMs = hours * 60 * 60 * 1000; // Convert hours to milliseconds
+    console.log(`\n[${new Date().toISOString()}] ⏱️ Setting up automatic timeout after ${hours} hours`);
+    
+    setTimeout(() => {
+        console.log(`\n[${new Date().toISOString()}] ⏱️ AUTOMATIC TIMEOUT TRIGGERED after ${hours} hours`);
+        console.log(`[${new Date().toISOString()}] Process is being terminated to prevent runaway execution`);
+        process.exit(0);
+    }, timeoutMs);
+}
+
+// Set up the global timeout for all processes
+setupProcessTimeout();
+
 
 export const OPENAI_PROMPTS = {
     cleanAndChunk: {
