@@ -515,6 +515,18 @@ function findWordPosition(text, targetWord, nearPosition, isStart, previousChunk
         console.log(`- nearPosition adjusted to: ${nearPosition} (was: ${origNearPosition})`);
     }
     
+    // Normalize the target word - remove diacritics and standardize punctuation
+    const normalizeText = (str) => {
+        return str.normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')  // Remove diacritics
+            .replace(/[.,;:!?'"—–-]/g, ' ')    // Replace punctuation with spaces
+            .replace(/\s+/g, ' ')              // Normalize spaces
+            .trim();
+    };
+    
+    const normalizedTargetWord = normalizeText(targetWord);
+    console.log(`- Normalized target word: "${normalizedTargetWord}"`);
+    
     // Define search range with tolerance
     const searchStart = Math.max(0, nearPosition - tolerance);
     const searchEnd = Math.min(text.length, nearPosition + tolerance);
@@ -539,6 +551,16 @@ function findWordPosition(text, targetWord, nearPosition, isStart, previousChunk
         return foundPosition;
     }
     console.log(`- No exact match found`);
+    
+    // Try searching for normalized version within normal tolerance first
+    console.log(`Trying normalized match within normal tolerance...`);
+    const words = searchArea.split(/\s+/);
+    let bestMatch = findBestMatch(words, normalizedTargetWord, searchArea, searchStart);
+    
+    if (bestMatch.position !== -1) {
+        console.log(`Found normalized match "${bestMatch.word}" for target "${targetWord}" at position ${bestMatch.position}`);
+        return bestMatch.position;
+    }
 
     // Try searching in a wider area if first search failed
     const widerStart = Math.max(0, nearPosition - tolerance * 2);
@@ -546,35 +568,13 @@ function findWordPosition(text, targetWord, nearPosition, isStart, previousChunk
     const widerArea = text.substring(widerStart, widerEnd);
     console.log(`\nTrying wider search: ${widerStart}-${widerEnd}`);
     
-    const words = widerArea.split(/\s+/);
-    let bestMatch = null;
-    let bestMatchIndex = -1;
-    let bestMatchDifference = Infinity;
-
-    for (let i = 0; i < words.length; i++) {
-        const word = words[i];
-        if (Math.abs(word.length - targetWord.length) <= 1) {
-            let differences = 0;
-            const minLength = Math.min(word.length, targetWord.length);
-            for (let j = 0; j < minLength; j++) {
-                if (word[j] !== targetWord[j]) differences++;
-                if (differences > 1) break;
-            }
-            
-            if (differences <= 1 && differences < bestMatchDifference) {
-                bestMatch = word;
-                bestMatchDifference = differences;
-                const wordPos = widerArea.indexOf(word);
-                if (wordPos !== -1) {
-                    bestMatchIndex = widerStart + wordPos;
-                }
-            }
-        }
-    }
-
-    if (bestMatchIndex !== -1) {
-        console.log(`Found fuzzy match "${bestMatch}" for target "${targetWord}" at position ${bestMatchIndex}`);
-        return bestMatchIndex;
+    // Try fuzzy matching within wider area
+    const widerWords = widerArea.split(/\s+/);
+    bestMatch = findBestMatch(widerWords, normalizedTargetWord, widerArea, widerStart);
+    
+    if (bestMatch.position !== -1) {
+        console.log(`Found fuzzy match "${bestMatch.word}" for target "${targetWord}" at position ${bestMatch.position}`);
+        return bestMatch.position;
     }
 
     // If no match found, use suggested position but ensure it's valid
@@ -603,6 +603,126 @@ function findWordPosition(text, targetWord, nearPosition, isStart, previousChunk
         console.log(`Using safe end position: ${safeEnd} (minLength: ${minLength})`);
         return safeEnd;
     }
+}
+
+/**
+ * Finds the best matching word from a list of candidates
+ * 
+ * @param {Array} words - Array of words to search through
+ * @param {string} targetWord - The word to match against
+ * @param {string} searchArea - The full text of the search area
+ * @param {number} areaStartPosition - The starting position of the search area in the original text
+ * @returns {Object} Best match result with position and word
+ */
+function findBestMatch(words, targetWord, searchArea, areaStartPosition) {
+    const normalizeText = (str) => {
+        return str.normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')  // Remove diacritics
+            .replace(/[.,;:!?'"—–-]/g, ' ')    // Replace punctuation with spaces
+            .replace(/\s+/g, ' ')              // Normalize spaces
+            .trim();
+    };
+    
+    let bestMatch = {
+        word: null,
+        similarity: 0,
+        position: -1
+    };
+    
+    // Single word exact match
+    for (let i = 0; i < words.length; i++) {
+        const word = words[i];
+        const normalizedWord = normalizeText(word);
+        
+        // For very short words, require exact match only
+        if (normalizedWord === targetWord) {
+            const wordPos = searchArea.indexOf(word);
+            if (wordPos !== -1) {
+                return {
+                    word: word,
+                    similarity: 1.0,
+                    position: areaStartPosition + wordPos
+                };
+            }
+        }
+    }
+    
+    // Try multi-word combinations (up to 3 words) for better context
+    for (let i = 0; i < words.length - 2; i++) {
+        const phrase2 = words.slice(i, i + 2).join(' ');
+        const phrase3 = words.slice(i, i + 3).join(' ');
+        
+        const normalizedPhrase2 = normalizeText(phrase2);
+        const normalizedPhrase3 = normalizeText(phrase3);
+        
+        // Check if phrases contain the target word
+        if (normalizedPhrase2.includes(targetWord) || normalizedPhrase3.includes(targetWord)) {
+            const phrase2Pos = searchArea.indexOf(phrase2);
+            const phrase3Pos = searchArea.indexOf(phrase3);
+            
+            if (phrase3Pos !== -1) {
+                return {
+                    word: phrase3,
+                    similarity: 1.0,
+                    position: areaStartPosition + phrase3Pos
+                };
+            }
+            
+            if (phrase2Pos !== -1) {
+                return {
+                    word: phrase2,
+                    similarity: 1.0, 
+                    position: areaStartPosition + phrase2Pos
+                };
+            }
+        }
+    }
+    
+    // Fuzzy matching using Levenshtein distance
+    const MAX_SIMILARITY_THRESHOLD = 0.7; // Require at least 70% similarity
+    
+    for (let i = 0; i < words.length; i++) {
+        const word = words[i];
+        const normalizedWord = normalizeText(word);
+        
+        // Skip very short words for fuzzy matching unless target is also short
+        if (normalizedWord.length < 3 && targetWord.length >= 3) continue;
+        
+        // Use Levenshtein distance to compute similarity 
+        const similarity = { 
+            distance: levenshteinDistance(normalizedWord, targetWord),
+            similarity: 0
+        };
+        
+        // Calculate similarity score (1.0 = perfect match)
+        const maxLength = Math.max(normalizedWord.length, targetWord.length);
+        if (maxLength > 0) {
+            similarity.similarity = 1 - (similarity.distance / maxLength);
+        }
+        
+        // For short words, be more strict
+        const threshold = targetWord.length <= 3 ? 0.8 : MAX_SIMILARITY_THRESHOLD;
+        
+        if (similarity.similarity > threshold && similarity.similarity > bestMatch.similarity) {
+            const wordPos = searchArea.indexOf(word);
+            if (wordPos !== -1) {
+                bestMatch = {
+                    word: word,
+                    similarity: similarity.similarity,
+                    position: areaStartPosition + wordPos
+                };
+            }
+        }
+    }
+    
+    // If best match meets threshold, return it
+    if (bestMatch.similarity >= MAX_SIMILARITY_THRESHOLD) {
+        console.log(`Found fuzzy match "${bestMatch.word}" with similarity ${bestMatch.similarity.toFixed(2)}`);
+        return bestMatch;
+    }
+    
+    // No good match found
+    return { word: null, similarity: 0, position: -1 };
 }
 
 /**
@@ -1111,7 +1231,7 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                 console.log(`Original: Start: ${chunk.startIndex}, End: ${chunk.endIndex}`);
                 
                 /**
-                 * OFFSET ADJUSTMENT
+                 * STEP 1: OFFSET ADJUSTMENT
                  * 
                  * Apply cumulative offset from previous chunks in this prechunk.
                  * This accounts for any drift between where the LLM thinks positions are
@@ -1129,9 +1249,31 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                 if (chunk.cleanedText && chunk.cleanedText.trim().length > 0) {
                     // Get words from the cleanedText
                     const words = chunk.cleanedText.trim().split(/\s+/);
-                    chunk.firstWord = words.length > 0 ? words[0] : '';
-                    chunk.lastWord = words.length > 0 ? words[words.length - 1] : '';
-                    console.log(`Words detected - First: "${chunk.firstWord}", Last: "${chunk.lastWord}"`);
+                    
+                    // Use firstWords/lastWords from LLM if available, otherwise extract from cleanedText
+                    if (chunk.firstWords) {
+                        chunk.firstWord = chunk.firstWords;
+                        console.log(`Using LLM-provided firstWords: "${chunk.firstWord}"`);
+                    } else {
+                    // Extract 3-4 word phrases for more robust boundary detection
+                    const startPhraseLength = Math.min(4, Math.ceil(words.length / 4), words.length);
+                    chunk.firstWord = words.slice(0, startPhraseLength).join(' ');
+                        console.log(`Generated firstWord phrase: "${chunk.firstWord}"`);
+                    }
+                    
+                    if (chunk.lastWords) {
+                        chunk.lastWord = chunk.lastWords;
+                        console.log(`Using LLM-provided lastWords: "${chunk.lastWord}"`);
+                    } else {
+                    // For the end phrase, take the last 3-4 words (or fewer if not available)
+                    const endPhraseLength = Math.min(4, Math.ceil(words.length / 4), words.length);
+                    chunk.lastWord = words.slice(-endPhraseLength).join(' ');
+                        console.log(`Generated lastWord phrase: "${chunk.lastWord}"`);
+                    }
+                    
+                    console.log(`Boundary phrases detected:`);
+                    console.log(`- First phrase: "${chunk.firstWord}"`);
+                    console.log(`- Last phrase: "${chunk.lastWord}"`);
                 }
                 
                 // Use the word boundary detection to get accurate positions
@@ -1146,6 +1288,14 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                     console.log(`- Last word to find: "${chunk.lastWord}"`);
                     console.log(`- Starting search at positions: ${suggestedStartIndex+1}-${suggestedEndIndex+1}`);
                     
+                    /**
+                     * STEP 2: WORD BOUNDARY DETECTION
+                     * 
+                     * Find exact word boundaries to ensure chunks break at natural points.
+                     * This is crucial for proper text extraction and avoiding broken words.
+                     * The findWordPosition function does fuzzy matching to handle cases
+                     * where exact matches aren't found.
+                     */
                     // Adjust positions based on actual word locations
                     const adjustedStartIndex = findWordPosition(
                         finalCleanedText, 
@@ -1168,6 +1318,15 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                     chunk.adjustedEndIndex = adjustedEndIndex + 1;
                     previousAdjustedEnd = adjustedEndIndex;
                     
+                    // Track additional metrics for database storage
+                    chunk.within_tolerance = Math.abs(adjustedStartIndex - suggestedStartIndex) <= tolerance && 
+                                             Math.abs(adjustedEndIndex - suggestedEndIndex) <= tolerance;
+                    chunk.position_difference = adjustedEndIndex - suggestedEndIndex;
+                    chunk.llm_suggested_end = chunk.endIndex;
+                    chunk.actual_end = chunk.adjustedEndIndex;
+                    chunk.first_word_match = adjustedStartIndex === suggestedStartIndex;
+                    chunk.last_word_match = adjustedEndIndex === suggestedEndIndex;
+                    
                     console.log(`\nWORD BOUNDARY RESULTS:`);
                     console.log(`- Original positions: ${chunk.startIndex}-${chunk.endIndex}`);
                     console.log(`- Final adjusted positions: ${chunk.adjustedStartIndex}-${chunk.adjustedEndIndex}`);
@@ -1175,19 +1334,22 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                     console.log(`======== END WORD BOUNDARY DETECTION ========\n`);
                     
                     /**
-                     * CUMULATIVE OFFSET CALCULATION
+                     * STEP 3: CUMULATIVE OFFSET CALCULATION
                      * 
                      * Calculate how far the actual end position (adjustedEndIndex) differs 
                      * from where the LLM thought it was (chunk.endIndex-1). This "drift"
-                     * is then applied to future chunks in this prechunk.
-                     * 
-                     * This offset doesn't carry between prechunks because each prechunk
-                     * gets its own LLM call with different position references.
+                     * is applied to future chunks in this prechunk, not the current one.
                      */
                     const newOffset = adjustedEndIndex - (chunk.endIndex - 1);  // Compare to original end position
-                    console.log(`Position drift: ${newOffset} characters from LLM's calculation`);
+                    console.log(`Position drift: ${newOffset} characters from LLM's calculation (will be applied to future chunks)`);
                     cumulativeOffset = newOffset;  // Update for next chunk
                     
+                    /**
+                     * STEP 4: TEXT RE-EXTRACTION
+                     * 
+                     * Now that we have final adjusted positions, we re-extract the text
+                     * to ensure we have accurate text content that aligns with word boundaries.
+                     */
                     // If positions were adjusted, re-extract the text
                     if (adjustedStartIndex !== suggestedStartIndex || adjustedEndIndex !== suggestedEndIndex) {
                         console.log(`Positions adjusted: ${suggestedStartIndex+1}-${suggestedEndIndex+1} -> ${chunk.adjustedStartIndex}-${chunk.adjustedEndIndex}`);
@@ -1387,7 +1549,14 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                     startIndex: chunk.adjustedStartIndex || chunk.startIndex,
                     endIndex: chunk.adjustedEndIndex || chunk.endIndex,
                     firstWord,
-                    lastWord
+                    lastWord,
+                    // Additional metrics for database storage
+                    within_tolerance: chunk.within_tolerance || false,
+                    position_difference: chunk.position_difference || 0,
+                    llm_suggested_end: chunk.llm_suggested_end || chunk.endIndex,
+                    actual_end: chunk.actual_end || (chunk.adjustedEndIndex || chunk.endIndex),
+                    first_word_match: chunk.first_word_match || false,
+                    last_word_match: chunk.last_word_match || false
                 };
             });
             

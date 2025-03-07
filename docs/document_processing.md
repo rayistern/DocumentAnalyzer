@@ -84,9 +84,15 @@ A critical aspect of document processing is accurately detecting chunk boundarie
      - Compensates for Unicode handling differences and other position drift
 
    - **Word Boundary Detection**: Uses `findWordPosition` to locate exact word matches
-     - Tries exact word matching within a tolerance range
-     - Falls back to fuzzy matching when exact matches fail
-     - Uses different strategies for start vs. end positions
+     - Uses multi-word phrases (3-4 words) at chunk boundaries for more reliable detection
+     - Performs text normalization to handle diacritics and punctuation
+     - Follows a systematic search approach:
+       1. Exact match within standard tolerance range
+       2. Normalized match within standard tolerance range
+       3. Multi-word phrase matching for better context
+       4. Fuzzy matching using Levenshtein distance within standard tolerance
+       5. Expanded search to wider tolerance range
+       6. Fallback to safe positions when no matches found
      - Ensures chunk boundaries are at word breaks, not mid-word
 
    - **Position Safety**: Ensures positions are valid and consistent
@@ -106,16 +112,48 @@ Initial Text: "This is some text with remainder prepended."
 LLM Says: "Chunk from position 6-15"
 Cumulative Offset: +2 (from previous chunks)
 Adjusted Position: 8-17
-Word Boundary Detection: Finds exact words at 9-18
+Boundary Detection: Finds "some text" at position 9-18
 Final Chunk: position 9-18 with text "some text"
 ```
 
-This system ensures that:
+### Multi-word Phrase Advantages
 
-1. Chunk boundaries always occur at word breaks
-2. Remainder text length is properly accounted for in all position calculations
-3. Position drift doesn't affect chunk integrity
-4. Chunks have proper content even if LLM returns incomplete data
+Using multi-word phrases (3-4 words) for boundary detection offers several key advantages:
+
+1. **Greater Uniqueness**: Phrases are much more likely to be unique within the text than single words
+2. **Better Context**: More words provide additional context for accurate matching
+3. **Robustness to Errors**: Multi-word matches are more tolerant of minor discrepancies
+4. **Improved Non-Latin Script Handling**: Better for languages like Hebrew where single words may be ambiguous
+
+### Fuzzy Matching System
+
+When exact matches cannot be found, the system employs fuzzy matching with these characteristics:
+
+1. **Text Normalization**: Pre-processes both search text and target by:
+   - Removing diacritical marks
+   - Standardizing punctuation
+   - Normalizing whitespace
+
+2. **Levenshtein Distance**: Calculates string similarity using edit distance algorithm
+   - More sophisticated than simple character comparison
+   - Works well for Unicode and non-Latin scripts
+   - Adapts threshold based on word length (stricter for short words)
+
+3. **Similarity Threshold**: Requires minimum 70% similarity for a match (80% for short words)
+   - Prevents poor matches like "זיו" for "כי" that have little semantic similarity
+
+### Search Order Progression
+
+The position detection follows this precise order:
+
+1. **Exact match** in normal tolerance range
+2. **Normalized match** in normal tolerance range  
+3. **Multi-word phrase matching** in normal tolerance range
+4. **Fuzzy matching with Levenshtein** in normal tolerance range
+5. Expand to wider tolerance and repeat steps 1-4
+6. **Safe position fallback** if no matches found
+
+This systematic approach ensures the most accurate position detection possible while gracefully handling edge cases.
 
 ## Remainder Text Handling
 

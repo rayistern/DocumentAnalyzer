@@ -73,7 +73,7 @@ export const OPENAI_PROMPTS = {
             role: "user",
             content: `Segment this text into self-contained sections based on topic shifts. Each chunk should fully capture a concept but remain under ${maxChunkLength} characters - and the longer the better.
             ${isIncomplete ? ' (note: this text may be cut off at the end, please ignore any incomplete text and on our end we will prepend that to the upcoming text we send your way. Leave the end of the document "unchunked" and we will automatically see that.)' : ''}
-                - Record the exact first and last complete words of each chunk for validation
+                - Record the exact first and last few words of each chunk for validation
                 - Each subsequent chunk MUST start right after the previous chunk's ending punctuation
                 - There MUST NOT be any gaps or overlaps between chunks
                 - Include all punctuation in the chunks
@@ -86,8 +86,8 @@ export const OPENAI_PROMPTS = {
                         {
                             "startIndex": 1,
                             "endIndex": 23,
-                            "firstWord": "The",
-                            "lastWord": "mat.",
+                            "firstWords": "The quick brown fox",
+                            "lastWords": "the lazy dog.",
                         }
                     ]
                 }`

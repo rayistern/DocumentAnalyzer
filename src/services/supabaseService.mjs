@@ -167,7 +167,13 @@ export async function saveAnalysis(content, type, metadata = {}) {
                         original_text: content.slice(Math.max(0, startIndex - 1), Math.min(content.length, endIndex)),
                         warnings: Array.isArray(chunk.warnings) ? chunk.warnings.join('\n') : chunk.warnings,
                         raw_metadata: chunk.metadata || null,
-                        created_at: new Date().toISOString()
+                        created_at: new Date().toISOString(),
+                        within_tolerance: chunk.within_tolerance,
+                        position_difference: chunk.position_difference,
+                        llm_suggested_end: chunk.llm_suggested_end,
+                        actual_end: chunk.actual_end,
+                        first_word_match: chunk.first_word_match,
+                        last_word_match: chunk.last_word_match
                     };
                     
                     // Validate all fields
