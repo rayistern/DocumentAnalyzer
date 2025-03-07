@@ -4,7 +4,7 @@ import { Command } from 'commander';
 import dotenv from 'dotenv';
 import { processFile, batchProcessFullMetadata } from './services/openaiService.mjs';
 import { readTextFile } from './utils/fileReader.mjs';
-import { getAnalysisByType } from './services/supabaseService.mjs';
+import { getAnalysisByType, logAllDocumentSources } from './services/supabaseService.mjs';
 import { glob } from 'glob';
 import path from 'path';
 import { convertToText } from './utils/documentConverter.mjs';
@@ -118,39 +118,61 @@ program
             // Track in-memory remainder text for continuation
             let remainderText = null;
             
+            // Add batch processing sequence tracking
+            console.log(`\n[${new Date().toISOString()}] 🔄 STARTING BATCH PROCESSING`);
+            console.log(`[${new Date().toISOString()}] Processing type: ${options.type}`);
+            console.log(`[${new Date().toISOString()}] Group: ${options.group || 'none'}`);
+            console.log(`[${new Date().toISOString()}] Skip metadata: ${options.skipMetadata ? 'true' : 'false'}`);
+            
+            // Log current document_sources entries
+            await logAllDocumentSources();
+            
+            // Track file processing sequence
+            let fileCounter = 0;
+            const totalFiles = files.length;
+            
             for (const file of files) {
                 try {
+                    fileCounter++;
                     const filename = path.basename(file);
+                    const processTimestamp = new Date().toISOString();
+                    
+                    console.log(`\n[${processTimestamp}] 📄 FILE ${fileCounter}/${totalFiles}: ${filename}`);
                     
                     // If we haven't reached the start file yet, skip
                     if (!shouldProcess) {
                         if (filename === startFromFile) {
                             shouldProcess = true;
-                            console.log(`Found start point: ${filename}`);
+                            console.log(`[${processTimestamp}] Found start point: ${filename}`);
                         }
-                        console.log(`Skipping ${filename} - before start point`);
+                        console.log(`[${processTimestamp}] Skipping ${filename} - before start point`);
                         continue;
                     }
                     
                     // Check if file exists in document_sources
+                    console.log(`[${processTimestamp}] Checking if document exists in database...`);
                     const exists = await checkDocumentExists(filename, options.reprocessIncomplete, options.group);
                     if (exists) {
-                        console.log(`Skipping ${filename} - already processed in group ${options.group}`);
+                        console.log(`[${processTimestamp}] Skipping ${filename} - already processed in group ${options.group}`);
                         continue;
                     }
 
-                    console.log(`\nProcessing ${filename}...`);
+                    console.log(`\n[${processTimestamp}] ⏳ PROCESSING ${filename}...`);
                     
                     // Convert to text
+                    console.log(`[${processTimestamp}] Converting to text...`);
                     const text = await convertToText(file);
                     
                     // Add clear logging about continuation status
-                    console.log(`Continuation mode: ${options.continuation ? 'ON' : 'OFF'}`);
+                    console.log(`[${processTimestamp}] Continuation mode: ${options.continuation ? 'ON' : 'OFF'}`);
                     if (options.continuation && remainderText !== null) {
-                        console.log(`Using in-memory remainder text (${remainderText.length} chars)`);
+                        console.log(`[${processTimestamp}] Using in-memory remainder text (${remainderText.length} chars)`);
                     }
                     
+                    console.log(`[${processTimestamp}] Using processing type: ${options.type}`);
+                    
                     // Process the text
+                    console.log(`[${processTimestamp}] Calling processFile function...`);
                     const result = await processFile(
                         text, 
                         options.type, 
@@ -165,23 +187,32 @@ program
                         options.continuation ? remainderText : null
                     );
 
-                    console.log(`Successfully processed ${filename}`);
-                    console.log('Chunks:', result.chunks ? result.chunks.length : 0);
+                    console.log(`[${processTimestamp}] ✅ Successfully processed ${filename}`);
+                    console.log(`[${processTimestamp}] Chunks: ${result.chunks ? result.chunks.length : 0}`);
                     if (result.warnings?.length > 0) {
-                        console.log('Warnings:', result.warnings);
+                        console.log(`[${processTimestamp}] Warnings:`, result.warnings);
                     }
 
                     // Update in-memory remainder for next file
                     if (result.remainderText) {
                         remainderText = result.remainderText;
-                        console.log(`Stored remainder text for next file (${remainderText.length} chars)`);
+                        console.log(`[${processTimestamp}] Stored remainder text for next file (${remainderText.length} chars)`);
                     }
+                    
+                    // Log document_sources after processing to track changes
+                    await logAllDocumentSources();
                 } catch (error) {
-                    console.error(`Error processing ${file}:`, error.message);
+                    const errorTimestamp = new Date().toISOString();
+                    console.error(`[${errorTimestamp}] ❌ ERROR processing ${file}:`, error.message);
+                    if (error.stack) {
+                        console.error(`[${errorTimestamp}] Stack trace:`, error.stack);
+                    }
                 }
             }
+            
+            console.log(`\n[${new Date().toISOString()}] 🏁 BATCH PROCESSING COMPLETE`);
         } catch (error) {
-            console.error('Batch processing error:', error.message);
+            console.error(`[${new Date().toISOString()}] ❌ Batch processing error:`, error.message);
             process.exit(1);
         }
     });

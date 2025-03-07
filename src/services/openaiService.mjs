@@ -78,7 +78,14 @@ export async function processFile(content, type, filepath, maxChunkLength = OPEN
                     response_ms: Date.now() - (metadataResponse.created * 1000) // Approximate response time
                 };
                 
-                await supabase
+                // Add detailed logging for document update
+                const updateTimestamp = new Date().toISOString();
+                console.log(`\n[${updateTimestamp}] 🔄 UPDATING document in fullMetadata_only case`);
+                console.log(`[${updateTimestamp}] Document ID: ${document.id}`);
+                console.log(`[${updateTimestamp}] Filepath: ${filepath}`);
+                console.log(`[${updateTimestamp}] Group: ${groupNumber || 'none'}`);
+                
+                const { error: updateError } = await supabase
                     .from('documents')
                     .update({ 
                         raw_llm_response: metadataResponse.choices[0].message.content,
@@ -86,9 +93,16 @@ export async function processFile(content, type, filepath, maxChunkLength = OPEN
                         keywords: metadata.keywords,
                         questions_answered: metadata.questionsAnswered,
                         api_metadata: apiMetadata,
+                        status: 'processed', // Add status update to mark as processed
                         updated_at: new Date().toISOString()
                     })
                     .eq('id', document.id);
+                
+                if (updateError) {
+                    console.error(`[${updateTimestamp}] ❌ ERROR updating document ${document.id}:`, updateError);
+                } else {
+                    console.log(`[${updateTimestamp}] ✅ Successfully updated document ${document.id} with metadata and set status to 'processed'`);
+                }
                 
                 // Return a structure matching what cleanAndChunkDocument returns
                 return {
