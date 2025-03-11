@@ -49,7 +49,7 @@ export const OPENAI_PROMPTS = {
     cleanAndChunk: {
         clean: (isIncomplete = false) => ({
             role: "user",
-            content: `This is a page from Likkutei Torah. Identify any text that should be removed from this document${isIncomplete ? ' (note: this text may be cut off at the end, please ignore any incomplete text)' : ''}, such as:
+            content: `This is a page from a Chabad Chassidic text (the title and author are in the header). Identify any text that should be removed from this document${isIncomplete ? ' (note: this text may be cut off at the end, please ignore any incomplete text)' : ''}, such as:
                 - Page numbers and headers (e.g., "Page 1", "Chapter 1:")
                 - Divider lines (e.g., "----------")
                 - Headers and footers (the top of each page may have the book / chapter / page number, for example - remove that whole string.)

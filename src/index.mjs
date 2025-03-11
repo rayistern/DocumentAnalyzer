@@ -10,25 +10,11 @@ import path from 'path';
 import { convertToText } from './utils/documentConverter.mjs';
 import { checkDocumentExists, getLastProcessedDocument } from './services/dbService.mjs';
 import { saveAnalysis } from './services/supabaseService.mjs';
+import { setupProcessTimeout } from './config.mjs';
 
 dotenv.config();
 
-// Global timeout setting in hours
-const GLOBAL_TIMEOUT_HOURS = 10;
-
-// Add automatic timeout function
-function setupProcessTimeout(hours = GLOBAL_TIMEOUT_HOURS) {
-    const timeoutMs = hours * 60 * 60 * 1000; // Convert hours to milliseconds
-    console.log(`\n[${new Date().toISOString()}] ⏱️ Setting up automatic timeout after ${hours} hours`);
-    
-    setTimeout(() => {
-        console.log(`\n[${new Date().toISOString()}] ⏱️ AUTOMATIC TIMEOUT TRIGGERED after ${hours} hours`);
-        console.log(`[${new Date().toISOString()}] Process is being terminated to prevent runaway execution`);
-        process.exit(0);
-    }, timeoutMs);
-}
-
-// Set up the global timeout for all processes
+// Global initialization - timeout will be updated when specific commands run
 setupProcessTimeout();
 
 const program = new Command();
@@ -108,6 +94,9 @@ program
     .option('--local-only', 'only use local files, ignore database for file selection', false)
     .action(async (pattern, options) => {
         try {
+            // Set up timeout specific to this process type
+            setupProcessTimeout(undefined, options.type);
+            
             const files = await glob(pattern);
             
             // Sort files based on the reverse flag
@@ -284,6 +273,9 @@ program
     .option('--reverse', 'process document IDs in reverse order')
     .action(async (ids, options) => {
         try {
+            // Set up timeout specific to this process type
+            setupProcessTimeout(undefined, 'process-metadata');
+            
             let documentIds = ids.split(',').map(id => parseInt(id.trim()));
             
             // Sort document IDs based on the reverse flag
