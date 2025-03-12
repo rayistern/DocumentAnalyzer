@@ -4,6 +4,7 @@
  * This file centralizes all timeout settings to prevent runaway processes.
  * See docs/timeout-system.md for complete documentation.
  */
+import readline from 'readline';
 
 // Global default timeout in hours - applies to all processes unless overridden
 export const GLOBAL_TIMEOUT_HOURS = 24;
@@ -35,7 +36,19 @@ export const PROCESS_OVERRIDES = {
 };
 
 /**
- * Sets up an automatic timeout to terminate the process after a specified duration
+ * Creates a readline interface for user input
+ * @returns {readline.Interface} A readline interface
+ */
+function createReadlineInterface() {
+    return readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
+}
+
+/**
+ * Sets up an automatic timeout to pause the process after a specified duration
+ * and prompts the user to continue or exit
  * 
  * @param {number} hours - Default timeout in hours (defaults to GLOBAL_TIMEOUT_HOURS)
  * @param {string} processType - Optional process type for command-specific overrides
@@ -64,9 +77,24 @@ export function setupProcessTimeout(hours = GLOBAL_TIMEOUT_HOURS, processType = 
     console.log(`\n[${new Date().toISOString()}] ⏱️ Setting up automatic timeout after ${finalHours} hours${overrideSource ? ` (using override from ${overrideSource})` : ''}`);
     
     setTimeout(() => {
-        console.log(`\n[${new Date().toISOString()}] ⏱️ AUTOMATIC TIMEOUT TRIGGERED after ${finalHours} hours`);
-        console.log(`[${new Date().toISOString()}] Process is being terminated to prevent runaway execution`);
-        process.exit(0);
+        console.log(`\n[${new Date().toISOString()}] ⏱️ TIMEOUT REACHED after ${finalHours} hours`);
+        console.log(`[${new Date().toISOString()}] Process has been running for a long time and will be paused.`);
+        
+        const rl = createReadlineInterface();
+        
+        // Prompt user to continue or exit
+        rl.question('Press "y" to continue processing, or any other key to exit: ', (answer) => {
+            rl.close();
+            
+            if (answer.toLowerCase() === 'y') {
+                console.log(`\n[${new Date().toISOString()}] ✅ Process continuing by user request`);
+                // Reset the timeout for another period
+                setupProcessTimeout(finalHours, processType);
+            } else {
+                console.log(`\n[${new Date().toISOString()}] ❌ Process terminated by user request`);
+                process.exit(0);
+            }
+        });
     }, timeoutMs);
 }
 
