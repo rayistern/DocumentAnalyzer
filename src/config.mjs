@@ -5,6 +5,8 @@
  * See docs/timeout-system.md for complete documentation.
  */
 import readline from 'readline';
+import fs from 'fs';
+import path from 'path';
 
 // Global default timeout in hours - applies to all processes unless overridden
 export const GLOBAL_TIMEOUT_HOURS = 24;
@@ -28,12 +30,17 @@ export const FILE_OVERRIDES = {
  */
 export const PROCESS_OVERRIDES = {
     // For batch processing specific types
-    'fullMetadata_only': 5,    // 20 hours for fullMetadata processing (which takes longer)
+    'fullMetadata_only': 5,    // 5 hours for fullMetadata processing
     //'cleanAndChunk': 12,        // 12 hours for cleanAndChunk processing
     
     // Can also set overrides for other command types
     // 'process-metadata': 18,   // Example: 18 hours for metadata processing command
 };
+
+// Flag to track if process is paused
+let isPaused = false;
+// Track timeouts to clear them if needed
+let activeTimeout = null;
 
 /**
  * Creates a readline interface for user input
@@ -47,14 +54,108 @@ function createReadlineInterface() {
 }
 
 /**
+ * Checks if the user has created a continue file to resume processing
+ * @returns {boolean} True if continue file exists, false otherwise
+ */
+function checkContinueFile() {
+    try {
+        const continueFilePath = path.join(process.cwd(), 'continue.txt');
+        if (fs.existsSync(continueFilePath)) {
+            // Read the file to see if it contains 'y'
+            const content = fs.readFileSync(continueFilePath, 'utf8').trim().toLowerCase();
+            const shouldContinue = content === 'y';
+            
+            // Delete the file after reading
+            fs.unlinkSync(continueFilePath);
+            
+            return shouldContinue;
+        }
+        return false;
+    } catch (error) {
+        console.error(`Error checking continue file: ${error.message}`);
+        return false;
+    }
+}
+
+/**
+ * Check for continue file periodically
+ * @param {number} hours - Timeout hours to pass to restart function
+ * @param {string} processType - Process type to pass to restart function
+ */
+function startContinueFileCheck(hours, processType) {
+    console.log(`\n[${new Date().toISOString()}] ⏱️ PROCESS PAUSED due to timeout`);
+    console.log(`[${new Date().toISOString()}] To continue, create a file named "continue.txt" in the current directory with the content "y"`);
+    console.log(`Current directory: ${process.cwd()}`);
+    
+    isPaused = true;
+    
+    // Check every 10 seconds if the continue file exists
+    const checkInterval = setInterval(() => {
+        if (checkContinueFile()) {
+            console.log(`\n[${new Date().toISOString()}] ✅ Continue file detected! Resuming process...`);
+            clearInterval(checkInterval);
+            isPaused = false;
+            
+            // Restart the timeout
+            setupProcessTimeout(hours, processType);
+        }
+    }, 10000); // Check every 10 seconds
+    
+    // Also set up the readline interface as a backup
+    tryReadlinePrompt(checkInterval, hours, processType);
+}
+
+/**
+ * Try to use readline interface as a backup method
+ * @param {NodeJS.Timeout} checkInterval - Interval to clear if readline succeeds
+ * @param {number} hours - Hours to pass to restart function
+ * @param {string} processType - Process type to pass to restart function
+ */
+function tryReadlinePrompt(checkInterval, hours, processType) {
+    try {
+        const rl = createReadlineInterface();
+        
+        console.log(`\n[${new Date().toISOString()}] If terminal is interactive, you can also type "y" and press Enter to continue:`);
+        
+        rl.question('Press "y" to continue processing, or any other key to exit: ', (answer) => {
+            rl.close();
+            
+            if (answer.toLowerCase() === 'y') {
+                console.log(`\n[${new Date().toISOString()}] ✅ Process continuing by user request`);
+                clearInterval(checkInterval);
+                isPaused = false;
+                
+                // Reset the timeout for another period
+                setupProcessTimeout(hours, processType);
+            } else {
+                console.log(`\n[${new Date().toISOString()}] ❌ Process terminated by user request`);
+                clearInterval(checkInterval);
+                process.exit(0);
+            }
+        });
+    } catch (error) {
+        console.error(`Error setting up readline: ${error.message}`);
+        // Continue with just the file check if readline fails
+    }
+}
+
+/**
  * Sets up an automatic timeout to pause the process after a specified duration
- * and prompts the user to continue or exit
+ * and provides multiple ways for the user to continue or exit
  * 
  * @param {number} hours - Default timeout in hours (defaults to GLOBAL_TIMEOUT_HOURS)
  * @param {string} processType - Optional process type for command-specific overrides
  * @returns {void}
  */
 export function setupProcessTimeout(hours = GLOBAL_TIMEOUT_HOURS, processType = null) {
+    // Don't set a new timeout if the process is paused
+    if (isPaused) return;
+    
+    // Clear any existing timeout
+    if (activeTimeout) {
+        clearTimeout(activeTimeout);
+    }
+    
     // 1. Start with the global default
     let finalHours = hours;
     let overrideSource = null;
@@ -76,25 +177,9 @@ export function setupProcessTimeout(hours = GLOBAL_TIMEOUT_HOURS, processType = 
     const timeoutMs = finalHours * 60 * 60 * 1000;
     console.log(`\n[${new Date().toISOString()}] ⏱️ Setting up automatic timeout after ${finalHours} hours${overrideSource ? ` (using override from ${overrideSource})` : ''}`);
     
-    setTimeout(() => {
-        console.log(`\n[${new Date().toISOString()}] ⏱️ TIMEOUT REACHED after ${finalHours} hours`);
-        console.log(`[${new Date().toISOString()}] Process has been running for a long time and will be paused.`);
-        
-        const rl = createReadlineInterface();
-        
-        // Prompt user to continue or exit
-        rl.question('Press "y" to continue processing, or any other key to exit: ', (answer) => {
-            rl.close();
-            
-            if (answer.toLowerCase() === 'y') {
-                console.log(`\n[${new Date().toISOString()}] ✅ Process continuing by user request`);
-                // Reset the timeout for another period
-                setupProcessTimeout(finalHours, processType);
-            } else {
-                console.log(`\n[${new Date().toISOString()}] ❌ Process terminated by user request`);
-                process.exit(0);
-            }
-        });
+    // Set the timeout
+    activeTimeout = setTimeout(() => {
+        startContinueFileCheck(finalHours, processType);
     }, timeoutMs);
 }
 
