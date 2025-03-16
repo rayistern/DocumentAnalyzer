@@ -121,10 +121,10 @@ Error processing metadata for chunk 3: TypeError: t.replace is not a function
 27. Why does text searching work for text to remove but not for chunking? Replicate all logic...
 28. Clearly define all searching logic...
 29. Remove delays
-30. In chunk 7 there's mentions of chunk 6
+30. In chunk 7 there's mentions of chunk 6. Maybe a 1/0 index technicality.
 31. Errors when starting up -fullMetadata_only process (Schema cache or something)
 32. How could last word matchbe true and following start matchbe false (or vice versa)? Update defaults...; make sure all is in order now.... (no gaps, etc)
-33. Can you please create context management. All messages to the AI should be within a context / conversation / session. The conversation will extend across different documents. We can truncate based on a specified number of how many documents, as configured in the config file. This will apply to both batch processing and to one off processing. There should be a flag --noContext to turn off the context feature, and that would just send each message to the LLM as a standalone.
+33. Please check if we have any context or session handling in our code already. Can you please create context management. All messages to the AI should be within a context / conversation / session. The conversation will extend across different documents. We can truncate based on a specified number of how many documents, as configured in the config file. This will apply to both batch processing and to one off processing. There should be a flag --noContext to turn off the context feature, and that would just send each message to the LLM as a standalone. Also, in the settings.mjs file, we should have an option on each prompt if to include it within the conversation or to excluded that prompt and have it always function as a standalone.
 34. Chunk_metadata llm model in database
 35. Add overview into more prompts
 36. Clean up files outside of main folder
