@@ -1544,7 +1544,15 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         // Calculate the new remainder text after all chunks have been processed
         // The remainder text is everything in finalCleanedText that comes after the last chunk's end
         const lastChunk = chunkResult?.chunks?.length > 0 ? chunkResult.chunks[chunkResult.chunks.length - 1] : null;
-        if (lastChunk && !lastChunk.drop_remaining) {
+        
+        // Check if the LLM explicitly set a remainder flag in its response
+        const llmRequestsRemainder = parsedResponse.remainder === true;
+        console.log(`LLM explicitly requested remainder: ${llmRequestsRemainder ? 'YES' : 'NO'}`);
+        
+        // Only create remainder if the LLM requested it or if we have no indication either way
+        const shouldCreateRemainder = llmRequestsRemainder || parsedResponse.remainder === undefined;
+        
+        if (lastChunk && !lastChunk.drop_remaining && shouldCreateRemainder) {
             /**
              * REMAINDER CALCULATION
              * 
@@ -1569,6 +1577,11 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                     console.log(`Remainder last 50 chars: "${remainderText.substring(Math.max(0, remainderText.length - 50))}"`);
                 }
             }
+        } else if (lastChunk && !lastChunk.drop_remaining && parsedResponse.remainder === false) {
+            // LLM explicitly indicated no remainder needed
+            console.log("LLM indicated no remainder is needed (remainder: false)");
+            console.log("Last chunk will be included as a regular chunk, not converted to remainder");
+            remainderText = "";
         }
         
         // Save the current chunkResult for this pre-chunk iteration

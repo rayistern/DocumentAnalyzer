@@ -64,7 +64,18 @@ function extractChunksFromString(jsonText) {
             }
         });
         
-        return { chunks };
+        // Also try to extract the remainder flag
+        let remainder = undefined;
+        const remainderMatch = jsonText.match(/"remainder"\s*:\s*(true|false)/);
+        if (remainderMatch) {
+            remainder = remainderMatch[1] === 'true';
+            console.log(`Extracted remainder flag: ${remainder}`);
+        }
+        
+        return { 
+            chunks,
+            remainder
+        };
     } catch (err) {
         console.error('Error in string-based chunk extraction:', err);
         return { chunks: [] };
