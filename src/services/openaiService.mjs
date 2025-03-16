@@ -7,27 +7,12 @@ import dotenv from 'dotenv'
 import { supabase } from './supabaseService.mjs';
 import { retryWithFallback, validateGap } from './errorHandlingService.mjs';
 import { parseJsonResponse } from '../utils/jsonUtils.mjs';
+import { setupProcessTimeout } from '../config.mjs';
 
 dotenv.config()
 
-// Global timeout setting in hours
-const GLOBAL_TIMEOUT_HOURS = 10;
-
-// Add automatic timeout function
-function setupProcessTimeout(hours = GLOBAL_TIMEOUT_HOURS) {
-    const timeoutMs = hours * 60 * 60 * 1000; // Convert hours to milliseconds
-    console.log(`\n[${new Date().toISOString()}] ⏱️ Setting up automatic timeout after ${hours} hours`);
-    
-    setTimeout(() => {
-        console.log(`\n[${new Date().toISOString()}] ⏱️ AUTOMATIC TIMEOUT TRIGGERED after ${hours} hours`);
-        console.log(`[${new Date().toISOString()}] Process is being terminated to prevent runaway execution`);
-        process.exit(0);
-    }, timeoutMs);
-}
-
 // Set up the global timeout for all processes
 setupProcessTimeout();
-
 
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY
@@ -40,6 +25,47 @@ function supportsJsonFormat(model) {
 }
 
 function createApiOptions(model, messages) {
+    // Combine consecutive user messages to save tokens
+    if (messages.length > 1) {
+        const combinedMessages = [];
+        let currentUserContent = null;
+        
+        for (let i = 0; i < messages.length; i++) {
+            const msg = messages[i];
+            
+            if (msg.role === "user") {
+                if (currentUserContent === null) {
+                    currentUserContent = msg.content;
+                } else {
+                    // Combine with previous user message
+                    currentUserContent += "\n\n" + msg.content;
+                }
+            } else {
+                // If we have pending user content, add it first
+                if (currentUserContent !== null) {
+                    combinedMessages.push({
+                        role: "user",
+                        content: currentUserContent
+                    });
+                    currentUserContent = null;
+                }
+                
+                // Add non-user message
+                combinedMessages.push(msg);
+            }
+        }
+        
+        // Add any remaining user content
+        if (currentUserContent !== null) {
+            combinedMessages.push({
+                role: "user",
+                content: currentUserContent
+            });
+        }
+        
+        messages = combinedMessages;
+    }
+
     const options = {
         model,
         messages
