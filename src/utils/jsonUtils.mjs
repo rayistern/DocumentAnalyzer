@@ -267,13 +267,16 @@ export function validateWithZod(data, schemaType = 'chunk') {
  * 
  * 1. Attempts standard JSON.parse with Zod validation
  * 2. If that fails, tries to extract just the JSON part from the response
- * 3. If that fails, falls back to regex-based string extraction
+ * 3. If that fails:
+ *    - For 'chunk' type: Falls back to regex-based string extraction
+ *    - For 'metadata'/'fullMetadata' types: Attempts final clean parsing
  * 4. If all parsing attempts fail, creates a single chunk for the entire text
+ *    (only relevant for 'chunk' schema type)
  * 
  * @param {string} jsonResponseText - The response text from the LLM
  * @param {string} cleanedText - The cleaned input text sent to the LLM
- * @param {string} schemaType - The type of schema to use ('chunk' or 'textRemoval')
- * @returns {Object} Parsed response with chunks
+ * @param {string} schemaType - The type of schema to use ('chunk', 'metadata', 'fullMetadata', 'textRemoval', etc.)
+ * @returns {Object} Parsed response object according to the specified schema type
  */
 export function parseJsonResponse(jsonResponseText, cleanedText, schemaType = 'chunk') {
     let parsedResponse;
@@ -334,6 +337,20 @@ export function parseJsonResponse(jsonResponseText, cleanedText, schemaType = 'c
             
             // If validation fails, still return the extracted chunks
             return extractedChunks;
+        }
+    } else if (schemaType === 'metadata' || schemaType === 'fullMetadata') {
+        // For metadata, simply return the parsed object since string extraction
+        // is primarily designed for chunks, not metadata objects
+        console.log(`[HEBREW-HANDLING] Skipping string-based extraction for ${schemaType} and using parsed data as-is`);
+        try {
+            // Attempt one more clean parse
+            const cleanedJson = cleanJsonResponse(jsonResponseText);
+            const parsedMetadata = JSON.parse(cleanedJson || jsonResponseText);
+            return parsedMetadata;
+        } catch (error) {
+            console.log(`[HEBREW-HANDLING] Final JSON parsing attempt failed for ${schemaType}:`, error.message);
+            // Return an empty object to avoid null errors
+            return {};
         }
     }
     
