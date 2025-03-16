@@ -1545,6 +1545,19 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         // The remainder text is everything in finalCleanedText that comes after the last chunk's end
         const lastChunk = chunkResult?.chunks?.length > 0 ? chunkResult.chunks[chunkResult.chunks.length - 1] : null;
         
+        /**
+         * IMPROVED REMAINDER HANDLING
+         * 
+         * This section determines whether to create a remainder and how to handle it.
+         * Key improvements:
+         * 1. Now respects the LLM's explicit "remainder" flag (true/false)
+         * 2. Checks if the last chunk actually reaches the end of the document
+         * 3. Creates a remainder if text remains unprocessed, regardless of flag
+         * 4. Logs detailed information about remainder creation decisions
+         * 
+         * This ensures no content is lost while still respecting LLM's semantic decisions.
+         */
+        
         // Check if the LLM explicitly set a remainder flag in its response
         const llmRequestsRemainder = parsedResponse.remainder === true;
         console.log(`LLM explicitly requested remainder: ${llmRequestsRemainder ? 'YES' : 'NO'}`);
