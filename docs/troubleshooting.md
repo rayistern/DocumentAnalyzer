@@ -230,6 +230,29 @@ Key log sections to examine:
 2. Use a faster LLM model in settings
 3. Process files in parallel (though this may affect continuation)
 
+## Metadata Processing Issues
+
+### Issue: "TypeError: x.replace is not a function"
+
+**Symptoms**:
+- Error in the console: `TypeError: e.replace is not a function` or `TypeError: t.replace is not a function`
+- Error occurs during metadata processing in `saveChunkMetadata` function
+- Processing terminates for the current chunk but may continue with subsequent chunks
+
+**Cause**:
+The error occurs when non-string values are present in array metadata fields, but the code attempts to call string methods on them.
+
+**Solutions**:
+1. The code now handles non-string values by converting them to strings:
+   ```javascript
+   // Updated array handling with type checking
+   named_entities: Array.isArray(mappedMetadata.named_entities) ? 
+     `{${mappedMetadata.named_entities.map(e => 
+       typeof e === 'string' ? `"${e.replace(/"/g, '\\"')}"` : `"${String(e)}"`
+     ).join(',')}}` : null
+   ```
+2. If you encounter this error, update all array field handlers in `saveChunkMetadata` with type checking
+
 ## Best Practices for Reliable Processing
 
 1. **Always use in-memory remainder passing** instead of database lookup
