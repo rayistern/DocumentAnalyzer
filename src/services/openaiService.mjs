@@ -460,7 +460,7 @@ async function summarizeContent(text) {
         );
 
         await logLLMResponse(null, response.choices[0].message.content, OPENAI_SETTINGS.model);
-        const result = parseJsonResponse(response.choices[0].message.content);
+        const result = parseJsonResponse(response.choices[0].message.content, text, 'summarize');
         
         // Store in Supabase
         await saveAnalysis(text, 'summary', result);
@@ -484,7 +484,7 @@ async function analyzeSentiment(text) {
         );
 
         await logLLMResponse(null, response.choices[0].message.content, OPENAI_SETTINGS.model);
-        const result = parseJsonResponse(response.choices[0].message.content);
+        const result = parseJsonResponse(response.choices[0].message.content, text, 'sentiment');
         
         // Store in Supabase
         await saveAnalysis(text, 'sentiment', result);

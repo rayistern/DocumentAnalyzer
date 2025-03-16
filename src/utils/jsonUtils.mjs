@@ -36,12 +36,47 @@ export const textRemovalSchema = z.object({
     }))
 });
 
-// Add the metadata schema definition
+// Replace the generic metadata schema with a more specific one
 /**
  * Zod schema for metadata responses
- * This is a flexible schema since metadata can have various fields
+ * Based on the structure defined in OPENAI_PROMPTS.metadata in settings.mjs
  */
-export const metadataSchema = z.object({}).catchall(z.any());
+export const metadataSchema = z.object({
+    long_summary: z.string().optional(),
+    short_summary: z.string().optional(),
+    quiz_questions: z.array(z.string()).optional(),
+    followup_thinking_questions: z.array(z.string()).optional(),
+    generated_title: z.string().optional(),
+    tags_he: z.array(z.string()).optional(),
+    key_terms_he: z.array(z.string()).optional(),
+    key_phrases_he: z.array(z.string()).optional(),
+    key_phrases_en: z.array(z.string()).optional(),
+    bibliography_snippets: z.array(
+        z.object({
+            snippet: z.string(),
+            source: z.string()
+        })
+    ).optional(),
+    questions_explicit: z.array(z.string()).optional(),
+    questions_implied: z.array(z.string()).optional(),
+    qa_pair: z.array(z.string()).optional(),
+    potential_typos: z.array(z.string()).optional(),
+    identified_abbreviations: z.array(z.string()).optional(),
+    named_entities: z.array(z.string()).optional()
+}).catchall(z.any()); // Still allow any extra fields for flexibility
+
+// Also create a schema for summarize responses
+export const summarizeSchema = z.object({
+    summary: z.string(),
+    keyPoints: z.array(z.string()).optional()
+}).catchall(z.any());
+
+// And a schema for sentiment responses
+export const sentimentSchema = z.object({
+    sentiment: z.enum(["positive", "negative", "neutral"]),
+    score: z.number().min(1).max(5),
+    confidence: z.number().min(0).max(1)
+}).catchall(z.any());
 
 export function cleanJsonResponse(text) {
     // Find the actual JSON content
@@ -136,13 +171,7 @@ export function createSingleDocumentChunk(text) {
     };
 }
 
-/**
- * Validates response data using Zod schemas
- * 
- * @param {Object} data - The parsed JSON data to validate 
- * @param {string} schemaType - The type of schema to use ('chunk', 'textRemoval', or 'metadata')
- * @returns {Object} The validated data or null if validation failed
- */
+// Update the validateWithZod function to handle the new schema types
 export function validateWithZod(data, schemaType = 'chunk') {
     try {
         let schema;
@@ -154,6 +183,10 @@ export function validateWithZod(data, schemaType = 'chunk') {
             schema = textRemovalSchema;
         } else if (schemaType === 'metadata') {
             schema = metadataSchema;
+        } else if (schemaType === 'summarize') {
+            schema = summarizeSchema;
+        } else if (schemaType === 'sentiment') {
+            schema = sentimentSchema;
         } else {
             console.warn(`[ZOD] Unknown schema type: ${schemaType}`);
             return null;

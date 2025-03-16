@@ -629,7 +629,7 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata) {
             reconciled_issues: Array.isArray(mappedMetadata.reconciled_issues) ? `{${mappedMetadata.reconciled_issues.map(i => `"${i.replace(/"/g, '\\"')}"`).join(',')}}` : null,
             qa_pair: qa_pair_value, // Use our specially formatted qa_pair value
             potential_typos: Array.isArray(mappedMetadata.potential_typos) ? `{${mappedMetadata.potential_typos.map(t => `"${t.replace(/"/g, '\\"')}"`).join(',')}}` : null,
-            named_entities: Array.isArray(mappedMetadata.named_entities) ? `{${mappedMetadata.named_entities.map(e => `"${e.replace(/"/g, '\\"')}"`).join(',')}}` : null,
+            named_entities: Array.isArray(mappedMetadata.named_entities) ? `{${mappedMetadata.named_entities.map(e => typeof e === 'string' ? `"${e.replace(/"/g, '\\"')}"` : `"${String(e)}"`).join(',')}}` : null,
             created_at: new Date().toISOString()
         };
 
