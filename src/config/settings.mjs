@@ -20,7 +20,7 @@ export const OPENAI_SETTINGS = {
         operations: {
             clean: "gpt-4o-mini",
             chunk: "o3-mini",
-            metadata: "gpt-4o-mini",
+            metadata: "gpt-4.5-preview",
             summarize: "gpt-4o-mini",
             sentiment: "gpt-4o-mini",
             fullMetadata: "gpt-4.5-preview"

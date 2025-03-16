@@ -4,12 +4,31 @@ import { z } from 'zod';
 // Define schemas for validation
 /**
  * Zod schema for chunk objects within the response
+ * Matches the chunks table structure
  */
 export const chunkSchema = z.object({
     startIndex: z.number().int().positive(),
     endIndex: z.number().int().positive(),
     firstWords: z.string().optional(),
-    lastWords: z.string().optional()
+    lastWords: z.string().optional(),
+    // Additional fields that might be present
+    content: z.string().optional(),
+    cleanedText: z.string().optional(),
+    firstWord: z.string().optional(),
+    lastWord: z.string().optional(),
+    // In database, warnings is TEXT not array
+    warnings: z.union([z.string(), z.array(z.string())]).optional(),
+    // Other database fields
+    drop_remaining: z.boolean().optional(),
+    within_tolerance: z.boolean().optional(),
+    position_difference: z.number().optional(),
+    llm_suggested_end: z.number().optional(),
+    actual_end: z.number().optional(),
+    first_word_match: z.boolean().optional(),
+    last_word_match: z.boolean().optional(),
+    // Metadata is a JSONB field in database
+    metadata: z.any().optional(),
+    raw_metadata: z.any().optional()
 }).refine(data => data.endIndex >= data.startIndex, {
     message: "endIndex must be greater than or equal to startIndex",
     path: ["endIndex"]
@@ -39,7 +58,7 @@ export const textRemovalSchema = z.object({
 // Replace the generic metadata schema with a more specific one
 /**
  * Zod schema for metadata responses
- * Based on the structure defined in OPENAI_PROMPTS.metadata in settings.mjs
+ * Based on the structure defined in the chunk_metadata table
  */
 export const metadataSchema = z.object({
     long_summary: z.string().optional(),
@@ -59,9 +78,10 @@ export const metadataSchema = z.object({
     ).optional(),
     questions_explicit: z.array(z.string()).optional(),
     questions_implied: z.array(z.string()).optional(),
-    qa_pair: z.array(z.string()).optional(),
+    reconciled_issues: z.array(z.string()).optional(),
+    qa_pair: z.any().optional(), // This is JSONB in the database
     potential_typos: z.array(z.string()).optional(),
-    identified_abbreviations: z.array(z.string()).optional(),
+    identified_abbreviations: z.array(z.any()).optional(), // This is JSONB[] in the database
     named_entities: z.array(z.string()).optional()
 }).catchall(z.any()); // Still allow any extra fields for flexibility
 
@@ -76,6 +96,13 @@ export const sentimentSchema = z.object({
     sentiment: z.enum(["positive", "negative", "neutral"]),
     score: z.number().min(1).max(5),
     confidence: z.number().min(0).max(1)
+}).catchall(z.any());
+
+// Also create schema for fullMetadata responses
+export const fullMetadataSchema = z.object({
+    longDescription: z.string().optional(),
+    keywords: z.array(z.string()).optional(),
+    questionsAnswered: z.array(z.string()).optional()
 }).catchall(z.any());
 
 export function cleanJsonResponse(text) {
@@ -133,7 +160,18 @@ export function extractChunksFromString(jsonText) {
                 startIndex,
                 endIndex,
                 firstWords,
-                lastWords
+                lastWords,
+                // Add database fields with default values
+                warnings: "",
+                raw_metadata: null,
+                firstWord: firstWords.split(' ').slice(0, 2).join(' '),
+                lastWord: lastWords.split(' ').slice(-2).join(' '),
+                within_tolerance: true,
+                position_difference: 0,
+                llm_suggested_end: endIndex,
+                actual_end: endIndex,
+                first_word_match: true,
+                last_word_match: true
             });
         }
     });
@@ -166,12 +204,26 @@ export function createSingleDocumentChunk(text) {
             endIndex: text.length,
             content: text,
             firstWords: text.substring(0, Math.min(30, text.length)),
-            lastWords: text.substring(Math.max(0, text.length - 30))
-        }]
+            lastWords: text.substring(Math.max(0, text.length - 30)),
+            // Add empty/default values for database fields
+            warnings: "", // String in DB, not array
+            raw_metadata: null, // JSONB in DB
+            cleanedText: text,
+            firstWord: text.substring(0, Math.min(10, text.length)),
+            lastWord: text.substring(Math.max(0, text.length - 10)),
+            // Additional DB fields
+            within_tolerance: true,
+            position_difference: 0,
+            llm_suggested_end: text.length,
+            actual_end: text.length,
+            first_word_match: true,
+            last_word_match: true
+        }],
+        remainder: false
     };
 }
 
-// Update the validateWithZod function to handle the new schema types
+// Update the validateWithZod function to handle the fullMetadata schema
 export function validateWithZod(data, schemaType = 'chunk') {
     try {
         let schema;
@@ -187,6 +239,8 @@ export function validateWithZod(data, schemaType = 'chunk') {
             schema = summarizeSchema;
         } else if (schemaType === 'sentiment') {
             schema = sentimentSchema;
+        } else if (schemaType === 'fullMetadata') {
+            schema = fullMetadataSchema;
         } else {
             console.warn(`[ZOD] Unknown schema type: ${schemaType}`);
             return null;

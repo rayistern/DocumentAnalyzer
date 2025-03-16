@@ -9,7 +9,7 @@ import fs from 'fs';
 import path from 'path';
 
 // Global default timeout in hours - applies to all processes unless overridden
-export const GLOBAL_TIMEOUT_HOURS = 24;
+export const GLOBAL_TIMEOUT_HOURS = 7;
 
 /**
  * File-specific timeout overrides

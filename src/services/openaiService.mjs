@@ -131,7 +131,7 @@ export async function processFile(content, type, filepath, maxChunkLength = OPEN
                 
                 // Store raw response and metadata
                 const cleanedResponse = removeMarkdownFormatting(metadataResponse.choices[0].message.content);
-                const metadata = parseJsonResponse(cleanedResponse, 'metadata');
+                const metadata = parseJsonResponse(cleanedResponse, 'fullMetadata');
                 
                 // Create API metadata object
                 const apiMetadata = {
@@ -1879,7 +1879,7 @@ export async function batchProcessFullMetadata(documentIds) {
             
             // Store raw response and metadata
             const cleanedResponse = removeMarkdownFormatting(metadataResponse.choices[0].message.content);
-            const metadata = parseJsonResponse(cleanedResponse, 'metadata');
+            const metadata = parseJsonResponse(cleanedResponse, 'fullMetadata');
             
             // Create API metadata object
             const apiMetadata = {
