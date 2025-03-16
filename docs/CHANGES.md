@@ -5,6 +5,18 @@ This document outlines the major improvements made to the document processing sy
 
 ## Recent Updates
 
+### Model Tracking for Metadata Generation (May 2024)
+- **Feature Added**: Added tracking of which model was used for generating metadata
+- **Implementation**: Added `model_used` column to `chunk_metadata` table
+- **Technical Details**:
+  - Extracts model information from OpenAI API response 
+  - Stores model name with each chunk's metadata
+  - Enables analysis of model performance differences
+- **Benefits**: 
+  - Better tracking of which models generated which metadata
+  - Improved debugging of model-specific issues
+  - Enhanced metadata quality assessment
+
 ### Metadata Type Error Handling Improvement (March 2024)
 - **Issue Fixed**: Resolved `TypeError: x.replace is not a function` errors during metadata processing
 - **Cause**: Non-string values in array metadata fields causing errors when string methods were called on them

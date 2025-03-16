@@ -1765,10 +1765,12 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                                 const cleanedResponse = removeMarkdownFormatting(metadataResponse.choices[0].message.content);
                                 const metadata = parseJsonResponse(cleanedResponse, 'metadata');
                                 
-                                // Save the metadata
-                                console.log(`Saving metadata for chunk ${i+1}...`);
-                                await saveChunkMetadata(document.id, i, metadata);
-                                console.log(`✅ Saved metadata for chunk ${i+1}`);
+                                // Add model information to the metadata
+                                console.log(`Model used for metadata: ${metadataResponse.model}`);
+                                
+                                // Save the metadata with model information
+                                await saveChunkMetadata(document.id, i, metadata, metadataResponse.model);
+                                console.log(`✅ Saved metadata for chunk ${i+1} using model: ${metadataResponse.model}`);
                             } else {
                                 console.log(`⚠️ Skipping metadata for chunk ${i+1} - no valid content`);
                             }

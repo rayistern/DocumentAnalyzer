@@ -562,12 +562,17 @@ export async function saveCleanedDocument(documentId, cleanedText, originalText,
     }
 }
 
-export async function saveChunkMetadata(documentId, chunkIndex, metadata) {
+export async function saveChunkMetadata(documentId, chunkIndex, metadata, modelUsed = null) {
     try {
         console.log(`Saving metadata for document ${documentId}, chunk ${chunkIndex}...`);
         
         // Log the raw metadata for debugging
         console.log(`Raw metadata for chunk ${chunkIndex}:`, JSON.stringify(metadata).substring(0, 200) + '...');
+        
+        // Log the model used if provided
+        if (modelUsed) {
+            console.log(`Model used for metadata: ${modelUsed}`);
+        }
         
         // Map LLM response fields to database fields if needed
         const mappedMetadata = {
@@ -630,7 +635,8 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata) {
             qa_pair: qa_pair_value, // Use our specially formatted qa_pair value
             potential_typos: Array.isArray(mappedMetadata.potential_typos) ? `{${mappedMetadata.potential_typos.map(t => typeof t === 'string' ? `"${t.replace(/"/g, '\\"')}"` : `"${String(t)}"`).join(',')}}` : null,
             named_entities: Array.isArray(mappedMetadata.named_entities) ? `{${mappedMetadata.named_entities.map(e => typeof e === 'string' ? `"${e.replace(/"/g, '\\"')}"` : `"${String(e)}"`).join(',')}}` : null,
-            created_at: new Date().toISOString()
+            created_at: new Date().toISOString(),
+            model_used: modelUsed // Add the model used
         };
 
         // Log metadata fields before saving
