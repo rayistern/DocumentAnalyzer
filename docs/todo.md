@@ -130,3 +130,4 @@ Error processing metadata for chunk 3: TypeError: t.replace is not a function
 36. Clean up files outside of main folder
 37. Clean up documentation
 38. Add a parameter somewhere where the LLM can tell us if he thinks that the text ends at a natural break.
+39. Why do we have so many single letters or sub words as first_word or last_word in the chunks table?
