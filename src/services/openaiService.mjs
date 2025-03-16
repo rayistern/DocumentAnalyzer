@@ -131,7 +131,7 @@ export async function processFile(content, type, filepath, maxChunkLength = OPEN
                 
                 // Store raw response and metadata
                 const cleanedResponse = removeMarkdownFormatting(metadataResponse.choices[0].message.content);
-                const metadata = parseJsonResponse(cleanedResponse);
+                const metadata = parseJsonResponse(cleanedResponse, 'metadata');
                 
                 // Create API metadata object
                 const apiMetadata = {
@@ -999,7 +999,7 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         await logLLMResponse(null, cleanResponse.choices[0].message.content, OPENAI_SETTINGS.model);
         let cleanResult;
         try {
-            cleanResult = parseJsonResponse(cleanResponse.choices[0].message.content);
+            cleanResult = parseJsonResponse(cleanResponse.choices[0].message.content, 'textRemoval');
         } catch (parseError) {
             console.warn('Failed to parse LLM response as JSON, storing raw response:', parseError.message);
             // Store the raw response and continue
@@ -1246,7 +1246,7 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         
         let parsedResponse;
         try {
-            parsedResponse = parseJsonResponse(removeMarkdownFormatting(rawChunkResponse));
+            parsedResponse = parseJsonResponse(removeMarkdownFormatting(rawChunkResponse), finalCleanedText, 'chunk');
             // Ensure parsedResponse always has chunks array
             if (!parsedResponse.chunks) {
                 parsedResponse.chunks = [];
@@ -1263,24 +1263,24 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                 console.log(`\n========== FULL RAW LLM RESPONSE ==========`);
                 console.log(rawChunkResponse);
                 console.log(`========== END FULL RAW RESPONSE ==========\n`);
-
+                
                 // Extract text for all chunks
                 for (const chunk of parsedResponse.chunks) {
                     // Always extract text based on positions
                     if (chunk.startIndex !== undefined && chunk.endIndex !== undefined) {
-                        const start = Math.max(0, chunk.startIndex); // 0-indexed positions
+                        const start = Math.max(0, chunk.startIndex - 1); // 0-indexed positions
                         const end = Math.min(finalCleanedText.length, chunk.endIndex);
                         
                         if (start < end && end <= finalCleanedText.length) {
                             chunk.cleanedText = finalCleanedText.substring(start, end);
-                            console.log(`Extracted text for position ${start}-${end}, length=${chunk.cleanedText.length}`);
+                            console.log(`Extracted text for position ${start+1}-${end}, length=${chunk.cleanedText.length}`);
                             console.log(`Text sample: "${chunk.cleanedText.substring(0, Math.min(50, chunk.cleanedText.length))}..."`);
                             
                             // Map boundary phrases
                             if (chunk.firstWords) chunk.firstWord = chunk.firstWords;
                             if (chunk.lastWords) chunk.lastWord = chunk.lastWords;
                         } else {
-                            console.error(`Invalid position range: ${start}-${end}`);
+                            console.error(`Invalid position range: ${start+1}-${end}`);
                             chunk.cleanedText = '';
                         }
                     } else {
@@ -1763,7 +1763,7 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                                 
                                 console.log(`Received metadata response for chunk ${i+1}`);
                                 const cleanedResponse = removeMarkdownFormatting(metadataResponse.choices[0].message.content);
-                                const metadata = parseJsonResponse(cleanedResponse);
+                                const metadata = parseJsonResponse(cleanedResponse, 'metadata');
                                 
                                 // Save the metadata
                                 console.log(`Saving metadata for chunk ${i+1}...`);
@@ -1879,7 +1879,7 @@ export async function batchProcessFullMetadata(documentIds) {
             
             // Store raw response and metadata
             const cleanedResponse = removeMarkdownFormatting(metadataResponse.choices[0].message.content);
-            const metadata = parseJsonResponse(cleanedResponse);
+            const metadata = parseJsonResponse(cleanedResponse, 'metadata');
             
             // Create API metadata object
             const apiMetadata = {

@@ -1,4 +1,47 @@
 import { setupProcessTimeout } from '../config.mjs';
+import { z } from 'zod';
+
+// Define schemas for validation
+/**
+ * Zod schema for chunk objects within the response
+ */
+export const chunkSchema = z.object({
+    startIndex: z.number().int().positive(),
+    endIndex: z.number().int().positive(),
+    firstWords: z.string().optional(),
+    lastWords: z.string().optional()
+}).refine(data => data.endIndex >= data.startIndex, {
+    message: "endIndex must be greater than or equal to startIndex",
+    path: ["endIndex"]
+});
+
+/**
+ * Zod schema for the entire chunk response
+ */
+export const chunkResponseSchema = z.object({
+    chunks: z.array(chunkSchema),
+    remainder: z.boolean().optional()
+});
+
+/**
+ * Zod schema for text removal objects
+ */
+export const textRemovalSchema = z.object({
+    textToRemove: z.array(z.object({
+        text: z.string(),
+        startPosition: z.number().int().positive(),
+        endPosition: z.number().int().positive(),
+        contextBefore: z.string().optional(),
+        contextAfter: z.string().optional()
+    }))
+});
+
+// Add the metadata schema definition
+/**
+ * Zod schema for metadata responses
+ * This is a flexible schema since metadata can have various fields
+ */
+export const metadataSchema = z.object({}).catchall(z.any());
 
 export function cleanJsonResponse(text) {
     // Find the actual JSON content
@@ -51,12 +94,12 @@ export function extractChunksFromString(jsonText) {
         let lastWords = lastWordsMatch ? lastWordsMatch[1] : '';
         
         if (startIndex !== null && endIndex !== null) {
-                        chunks.push({
-                            startIndex,
-                            endIndex,
-                            firstWords,
-                            lastWords
-                        });
+            chunks.push({
+                startIndex,
+                endIndex,
+                firstWords,
+                lastWords
+            });
         }
     });
     
@@ -66,12 +109,12 @@ export function extractChunksFromString(jsonText) {
     
     if (remainder !== undefined) {
         console.log(`[HEBREW-HANDLING] Extracted remainder flag: ${remainder}`);
-        }
-        
-        return { 
-            chunks,
-            remainder
-        };
+    }
+    
+    return { 
+        chunks,
+        remainder
+    };
 }
 
 /**
@@ -94,39 +137,94 @@ export function createSingleDocumentChunk(text) {
 }
 
 /**
+ * Validates response data using Zod schemas
+ * 
+ * @param {Object} data - The parsed JSON data to validate 
+ * @param {string} schemaType - The type of schema to use ('chunk', 'textRemoval', or 'metadata')
+ * @returns {Object} The validated data or null if validation failed
+ */
+export function validateWithZod(data, schemaType = 'chunk') {
+    try {
+        let schema;
+        
+        // Select the appropriate schema based on the data structure
+        if (schemaType === 'chunk') {
+            schema = chunkResponseSchema;
+        } else if (schemaType === 'textRemoval') {
+            schema = textRemovalSchema;
+        } else if (schemaType === 'metadata') {
+            schema = metadataSchema;
+        } else {
+            console.warn(`[ZOD] Unknown schema type: ${schemaType}`);
+            return null;
+        }
+        
+        // Validate the data against the schema
+        const validatedData = schema.parse(data);
+        console.log(`[ZOD] Successfully validated ${schemaType} data`);
+        return validatedData;
+    } catch (error) {
+        console.warn(`[ZOD] Validation failed for ${schemaType} data:`, error.message);
+        if (error.errors) {
+            console.warn(`[ZOD] Validation errors:`, error.errors);
+        }
+        return null;
+    }
+}
+
+/**
  * Parses JSON response from LLM with enhanced handling for Hebrew text.
  * 
  * This function implements a multi-layered fallback approach to handle
  * Hebrew text with embedded quotes that can break standard JSON parsing:
  * 
- * 1. Attempts standard JSON.parse on the response first
+ * 1. Attempts standard JSON.parse with Zod validation
  * 2. If that fails, tries to extract just the JSON part from the response
  * 3. If that fails, falls back to regex-based string extraction
  * 4. If all parsing attempts fail, creates a single chunk for the entire text
  * 
  * @param {string} jsonResponseText - The response text from the LLM
  * @param {string} cleanedText - The cleaned input text sent to the LLM
+ * @param {string} schemaType - The type of schema to use ('chunk' or 'textRemoval')
  * @returns {Object} Parsed response with chunks
  */
-export function parseJsonResponse(jsonResponseText, cleanedText) {
+export function parseJsonResponse(jsonResponseText, cleanedText, schemaType = 'chunk') {
     let parsedResponse;
     
-    // First attempt: Try standard JSON.parse
+    // First attempt: Try standard JSON.parse with Zod validation
     try {
-        parsedResponse = JSON.parse(jsonResponseText);
-        console.log("[HEBREW-HANDLING] Successfully parsed response with standard JSON.parse");
-        return parsedResponse;
+        const parsed = JSON.parse(jsonResponseText);
+        
+        // Validate with Zod
+        const validated = validateWithZod(parsed, schemaType);
+        if (validated) {
+            console.log("[HEBREW-HANDLING] Successfully parsed and validated response with Zod");
+            return validated;
+        }
+        
+        // If Zod validation fails but JSON parsing worked, still return the parsed JSON
+        console.log("[HEBREW-HANDLING] JSON parsing succeeded but Zod validation failed. Using parsed data anyway.");
+        return parsed;
     } catch (error) {
         console.log("[HEBREW-HANDLING] Standard JSON parsing failed:", error.message);
     }
     
-    // Second attempt: Extract JSON part and try to parse
+    // Second attempt: Extract JSON part and try to parse with Zod
     try {
         const extractedJson = cleanJsonResponse(jsonResponseText);
         if (extractedJson) {
-            parsedResponse = JSON.parse(extractedJson);
-            console.log("[HEBREW-HANDLING] Successfully parsed extracted JSON portion");
-            return parsedResponse;
+            const parsed = JSON.parse(extractedJson);
+            
+            // Validate with Zod
+            const validated = validateWithZod(parsed, schemaType);
+            if (validated) {
+                console.log("[HEBREW-HANDLING] Successfully parsed and validated extracted JSON with Zod");
+                return validated;
+            }
+            
+            // If Zod validation fails but JSON parsing worked, return the parsed JSON
+            console.log("[HEBREW-HANDLING] Extracted JSON parsing succeeded but Zod validation failed. Using parsed data anyway.");
+            return parsed;
         }
     } catch (error) {
         console.log("[HEBREW-HANDLING] Extracted JSON parsing failed:", error.message);
@@ -134,11 +232,22 @@ export function parseJsonResponse(jsonResponseText, cleanedText) {
     
     // Third attempt: Fallback to string-based extraction
     console.log("[HEBREW-HANDLING] Attempting string-based chunk extraction");
-    const extractedChunks = extractChunksFromString(jsonResponseText);
-    
-    if (extractedChunks.chunks && extractedChunks.chunks.length > 0) {
-        console.log(`[HEBREW-HANDLING] Successfully extracted ${extractedChunks.chunks.length} chunks using string-based approach`);
-        return extractedChunks;
+    if (schemaType === 'chunk') {
+        const extractedChunks = extractChunksFromString(jsonResponseText);
+        
+        if (extractedChunks.chunks && extractedChunks.chunks.length > 0) {
+            console.log(`[HEBREW-HANDLING] Successfully extracted ${extractedChunks.chunks.length} chunks using string-based approach`);
+            
+            // Try to validate the extracted chunks
+            const validated = validateWithZod(extractedChunks, 'chunk');
+            if (validated) {
+                console.log("[HEBREW-HANDLING] Successfully validated string-extracted chunks with Zod");
+                return validated;
+            }
+            
+            // If validation fails, still return the extracted chunks
+            return extractedChunks;
+        }
     }
     
     // Final fallback: Create a single document chunk

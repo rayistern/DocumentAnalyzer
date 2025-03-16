@@ -75,14 +75,34 @@ Improved JSON extraction with:
 - Improved handling of edge cases
 - Better detection of LLM's intentions regarding remainder text
 
+## 5. Zod Schema Validation
+
+### Issue
+JSON parsing relied solely on `JSON.parse()`, which doesn't validate the structure or types of the parsed data, leading to potential runtime errors when expected fields were missing or had incorrect types.
+
+### Solution
+Implemented Zod schema validation for all JSON responses:
+
+1. **Defined Schemas**: Created schemas for different response types (chunks, text removal, metadata)
+2. **Type Validation**: Ensure all fields have the expected types (numbers, strings, booleans)
+3. **Required Fields**: Explicitly define which fields are required vs. optional
+4. **Format Validation**: Added refinements to verify data relationships (e.g., endIndex >= startIndex)
+5. **Multi-Layer Parsing**: Integrated Zod into the existing fallback chain, still allowing fallback to regex when necessary
+
+### Benefits
+- Early detection of malformed responses
+- Detailed validation errors for easier debugging
+- Type safety for all parsed responses
+- Maintained robust fallback mechanisms for Hebrew text
+
 ## Implementation Details
 
 These improvements were implemented across several files:
 
-- `src/utils/jsonUtils.mjs`: Enhanced JSON parsing and chunk extraction
+- `src/utils/jsonUtils.mjs`: Enhanced JSON parsing and chunk extraction, added Zod validation
 - `src/services/openaiService.mjs`: Improved remainder handling and word boundary detection
 - `src/config/settings.mjs`: Updated settings for Hebrew text processing
 
 ## Conclusion
 
-These improvements significantly enhance the Document Analyzer's ability to process Hebrew text reliably, handle remainder text appropriately, and maintain the integrity of document processing. The system now better respects the LLM's semantic decisions while ensuring no content is lost during processing. 
+These improvements significantly enhance the Document Analyzer's ability to process Hebrew text reliably, handle remainder text appropriately, and maintain the integrity of document processing. The system now better respects the LLM's semantic decisions while ensuring no content is lost during processing. The addition of Zod schema validation provides an extra layer of robustness against malformed responses. 
