@@ -127,3 +127,6 @@ Error processing metadata for chunk 3: TypeError: t.replace is not a function
 33. Can you please create context management. All messages to the AI should be within a context / conversation / session. The conversation will extend across different documents. We can truncate based on a specified number of how many documents, as configured in the config file. This will apply to both batch processing and to one off processing. There should be a flag --noContext to turn off the context feature, and that would just send each message to the LLM as a standalone.
 34. Chunk_metadata llm model in database
 35. Add overview into more prompts
+36. Clean up files outside of main folder
+37. Clean up documentation
+38. Add a parameter somewhere where the LLM can tell us if he thinks that the text ends at a natural break.
