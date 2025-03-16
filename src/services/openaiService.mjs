@@ -1549,8 +1549,21 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         const llmRequestsRemainder = parsedResponse.remainder === true;
         console.log(`LLM explicitly requested remainder: ${llmRequestsRemainder ? 'YES' : 'NO'}`);
         
-        // Only create remainder if the LLM requested it or if we have no indication either way
-        const shouldCreateRemainder = llmRequestsRemainder || parsedResponse.remainder === undefined;
+        // Check if the last chunk reaches the end of the document (with some tolerance)
+        const END_TOLERANCE = 10; // Allow 10 characters of tolerance
+        const lastChunkEndIndex = lastChunk ? (lastChunk.adjustedEndIndex || lastChunk.endIndex) - 1 : 0; // Convert to 0-indexed
+        const reachesEnd = lastChunkEndIndex >= finalCleanedText.length - END_TOLERANCE;
+        console.log(`Last chunk reaches end of document: ${reachesEnd ? 'YES' : 'NO'}`);
+        console.log(`Last chunk end position: ${lastChunkEndIndex+1}, Document length: ${finalCleanedText.length}`);
+        console.log(`Distance from end: ${finalCleanedText.length - lastChunkEndIndex - 1} characters`);
+        
+        // Determine if we should create a remainder:
+        // 1. LLM explicitly requests remainder, OR
+        // 2. LLM doesn't specify (undefined), OR
+        // 3. The last chunk doesn't reach the end of the document (regardless of remainder flag)
+        const shouldCreateRemainder = llmRequestsRemainder || 
+                                      parsedResponse.remainder === undefined || 
+                                      (lastChunk && !reachesEnd);
         
         if (lastChunk && !lastChunk.drop_remaining && shouldCreateRemainder) {
             /**
@@ -1565,8 +1578,18 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
             // Only update remainderText if the last processed chunk is valid
             // Get everything after the last chunk's end index
             // Use adjustedEndIndex if available, fall back to endIndex
-            const endPosition = (lastChunk.adjustedEndIndex || lastChunk.endIndex) - 1; // Convert to 0-indexed
+            const endPosition = lastChunkEndIndex; // Already converted to 0-indexed above
             remainderText = finalCleanedText.substring(endPosition);
+            
+            // Log the reason for creating a remainder
+            if (llmRequestsRemainder) {
+                console.log(`[TRACK] Creating remainder because LLM explicitly requested it (remainder=true)`);
+            } else if (parsedResponse.remainder === undefined) {
+                console.log(`[TRACK] Creating remainder because LLM didn't specify (remainder is undefined)`);
+            } else if (!reachesEnd) {
+                console.log(`[TRACK] Creating remainder because last chunk doesn't reach end of document (${finalCleanedText.length - lastChunkEndIndex - 1} chars remaining)`);
+            }
+            
             console.log(`[TRACK] UPDATED: remainderText = text after last chunk (${endPosition} to end)`);
             console.log(`[TRACK] new remainderText length: ${remainderText.length} chars`);
             
@@ -1577,9 +1600,9 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                     console.log(`Remainder last 50 chars: "${remainderText.substring(Math.max(0, remainderText.length - 50))}"`);
                 }
             }
-        } else if (lastChunk && !lastChunk.drop_remaining && parsedResponse.remainder === false) {
-            // LLM explicitly indicated no remainder needed
-            console.log("LLM indicated no remainder is needed (remainder: false)");
+        } else if (lastChunk && !lastChunk.drop_remaining && parsedResponse.remainder === false && reachesEnd) {
+            // LLM explicitly indicated no remainder needed AND the last chunk reaches the end
+            console.log("LLM indicated no remainder is needed (remainder: false) and last chunk reaches end of document");
             console.log("Last chunk will be included as a regular chunk, not converted to remainder");
             remainderText = "";
         }
