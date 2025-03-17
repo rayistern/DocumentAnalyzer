@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient, sql } from '@supabase/supabase-js'
 import dotenv from 'dotenv'
 import { parseJsonResponse } from '../utils/jsonUtils.mjs'
 import { calculateContentHash } from '../utils/deduplication.mjs'
@@ -635,14 +635,18 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata, modelU
             key_terms_he: Array.isArray(mappedMetadata.key_terms_he) ? `{${mappedMetadata.key_terms_he.map(t => typeof t === 'string' ? `"${t.replace(/"/g, '\\"')}"` : `"${String(t)}"`).join(',')}}` : null,
             key_phrases_he: Array.isArray(mappedMetadata.key_phrases_he) ? `{${mappedMetadata.key_phrases_he.map(p => typeof p === 'string' ? `"${p.replace(/"/g, '\\"')}"` : `"${String(p)}"`).join(',')}}` : null,
             key_phrases_en: Array.isArray(mappedMetadata.key_phrases_en) ? `{${mappedMetadata.key_phrases_en.map(p => typeof p === 'string' ? `"${p.replace(/"/g, '\\"')}"` : `"${String(p)}"`).join(',')}}` : null,
-            bibliography_snippets: Array.isArray(mappedMetadata.bibliography_snippets) ? mappedMetadata.bibliography_snippets : null,
+            bibliography_snippets: Array.isArray(mappedMetadata.bibliography_snippets) && mappedMetadata.bibliography_snippets.length > 0 ? 
+                JSON.stringify(mappedMetadata.bibliography_snippets) // Just store a regular JSON array as text for now
+                : null,
             // Skip problematic fields
             questions_explicit: Array.isArray(mappedMetadata.questions_explicit) ? `{${mappedMetadata.questions_explicit.map(q => typeof q === 'string' ? `"${q.replace(/"/g, '\\"')}"` : `"${String(q)}"`).join(',')}}` : null,
             questions_implied: Array.isArray(mappedMetadata.questions_implied) ? `{${mappedMetadata.questions_implied.map(q => typeof q === 'string' ? `"${q.replace(/"/g, '\\"')}"` : `"${String(q)}"`).join(',')}}` : null,
             reconciled_issues: Array.isArray(mappedMetadata.reconciled_issues) ? `{${mappedMetadata.reconciled_issues.map(i => typeof i === 'string' ? `"${i.replace(/"/g, '\\"')}"` : `"${String(i)}"`).join(',')}}` : null,
             qa_pair: qa_pair_value,
             potential_typos: Array.isArray(mappedMetadata.potential_typos) ? `{${mappedMetadata.potential_typos.map(t => typeof t === 'string' ? `"${t.replace(/"/g, '\\"')}"` : `"${String(t)}"`).join(',')}}` : null,
-            identified_abbreviations: Array.isArray(mappedMetadata.identified_abbreviations) ? mappedMetadata.identified_abbreviations : null,
+            identified_abbreviations: Array.isArray(mappedMetadata.identified_abbreviations) && mappedMetadata.identified_abbreviations.length > 0 ? 
+                JSON.stringify(mappedMetadata.identified_abbreviations) // Just store a regular JSON array as text for now
+                : null,
             named_entities: Array.isArray(mappedMetadata.named_entities) ? `{${mappedMetadata.named_entities.map(e => typeof e === 'string' ? `"${e.replace(/"/g, '\\"')}"` : `"${String(e)}"`).join(',')}}` : null,
             created_at: new Date().toISOString(),
             model_used: modelUsed,
