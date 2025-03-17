@@ -1,4 +1,5 @@
-import { createClient, sql } from '@supabase/supabase-js'
+import pkg from '@supabase/supabase-js';
+const { createClient } = pkg;
 import dotenv from 'dotenv'
 import { parseJsonResponse } from '../utils/jsonUtils.mjs'
 import { calculateContentHash } from '../utils/deduplication.mjs'
@@ -635,8 +636,8 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata, modelU
             key_terms_he: Array.isArray(mappedMetadata.key_terms_he) ? `{${mappedMetadata.key_terms_he.map(t => typeof t === 'string' ? `"${t.replace(/"/g, '\\"')}"` : `"${String(t)}"`).join(',')}}` : null,
             key_phrases_he: Array.isArray(mappedMetadata.key_phrases_he) ? `{${mappedMetadata.key_phrases_he.map(p => typeof p === 'string' ? `"${p.replace(/"/g, '\\"')}"` : `"${String(p)}"`).join(',')}}` : null,
             key_phrases_en: Array.isArray(mappedMetadata.key_phrases_en) ? `{${mappedMetadata.key_phrases_en.map(p => typeof p === 'string' ? `"${p.replace(/"/g, '\\"')}"` : `"${String(p)}"`).join(',')}}` : null,
-            bibliography_snippets: Array.isArray(mappedMetadata.bibliography_snippets) && mappedMetadata.bibliography_snippets.length > 0 ? 
-                JSON.stringify(mappedMetadata.bibliography_snippets) // Just store a regular JSON array as text for now
+            bibliography_snippets_jsonb: Array.isArray(mappedMetadata.bibliography_snippets) && mappedMetadata.bibliography_snippets.length > 0 ? 
+                mappedMetadata.bibliography_snippets // Pass as direct object for JSONB
                 : null,
             // Skip problematic fields
             questions_explicit: Array.isArray(mappedMetadata.questions_explicit) ? `{${mappedMetadata.questions_explicit.map(q => typeof q === 'string' ? `"${q.replace(/"/g, '\\"')}"` : `"${String(q)}"`).join(',')}}` : null,
@@ -644,8 +645,8 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata, modelU
             reconciled_issues: Array.isArray(mappedMetadata.reconciled_issues) ? `{${mappedMetadata.reconciled_issues.map(i => typeof i === 'string' ? `"${i.replace(/"/g, '\\"')}"` : `"${String(i)}"`).join(',')}}` : null,
             qa_pair: qa_pair_value,
             potential_typos: Array.isArray(mappedMetadata.potential_typos) ? `{${mappedMetadata.potential_typos.map(t => typeof t === 'string' ? `"${t.replace(/"/g, '\\"')}"` : `"${String(t)}"`).join(',')}}` : null,
-            identified_abbreviations: Array.isArray(mappedMetadata.identified_abbreviations) && mappedMetadata.identified_abbreviations.length > 0 ? 
-                JSON.stringify(mappedMetadata.identified_abbreviations) // Just store a regular JSON array as text for now
+            identified_abbreviations_jsonb: Array.isArray(mappedMetadata.identified_abbreviations) && mappedMetadata.identified_abbreviations.length > 0 ? 
+                mappedMetadata.identified_abbreviations // Pass as direct object for JSONB
                 : null,
             named_entities: Array.isArray(mappedMetadata.named_entities) ? `{${mappedMetadata.named_entities.map(e => typeof e === 'string' ? `"${e.replace(/"/g, '\\"')}"` : `"${String(e)}"`).join(',')}}` : null,
             created_at: new Date().toISOString(),
@@ -657,20 +658,20 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata, modelU
         console.log(`Preparing to save metadata for chunk ${chunkIndex} with fields:`, 
             Object.keys(formattedMetadata).filter(k => formattedMetadata[k] !== null).join(', '));
 
-        // Add extra debugging for JSONB[] fields
-        if (formattedMetadata.bibliography_snippets) {
-            console.log(`bibliography_snippets format check:`, {
-                isArray: Array.isArray(formattedMetadata.bibliography_snippets),
-                value: JSON.stringify(formattedMetadata.bibliography_snippets).substring(0, 100) + '...',
-                sample: formattedMetadata.bibliography_snippets[0]
+        // Add extra debugging for JSONB fields
+        if (formattedMetadata.bibliography_snippets_jsonb) {
+            console.log(`bibliography_snippets_jsonb format check:`, {
+                isArray: Array.isArray(formattedMetadata.bibliography_snippets_jsonb),
+                value: JSON.stringify(formattedMetadata.bibliography_snippets_jsonb).substring(0, 100) + '...',
+                sample: formattedMetadata.bibliography_snippets_jsonb[0]
             });
         }
         
-        if (formattedMetadata.identified_abbreviations) {
-            console.log(`identified_abbreviations format check:`, {
-                isArray: Array.isArray(formattedMetadata.identified_abbreviations),
-                value: JSON.stringify(formattedMetadata.identified_abbreviations).substring(0, 100) + '...',
-                sample: formattedMetadata.identified_abbreviations[0]
+        if (formattedMetadata.identified_abbreviations_jsonb) {
+            console.log(`identified_abbreviations_jsonb format check:`, {
+                isArray: Array.isArray(formattedMetadata.identified_abbreviations_jsonb),
+                value: JSON.stringify(formattedMetadata.identified_abbreviations_jsonb).substring(0, 100) + '...',
+                sample: formattedMetadata.identified_abbreviations_jsonb[0]
             });
         }
 

@@ -76,12 +76,19 @@ export const metadataSchema = z.object({
             source: z.string()
         })
     ).optional(),
+    bibliography_snippets_jsonb: z.array(
+        z.object({
+            snippet: z.string(),
+            source: z.string()
+        })
+    ).optional(),
     questions_explicit: z.array(z.string()).optional(),
     questions_implied: z.array(z.string()).optional(),
     reconciled_issues: z.array(z.string()).optional(),
     qa_pair: z.any().optional(), // This is JSONB in the database
     potential_typos: z.array(z.string()).optional(),
     identified_abbreviations: z.array(z.any()).optional(), // This is JSONB[] in the database
+    identified_abbreviations_jsonb: z.array(z.any()).optional(), // This is JSONB in the database
     named_entities: z.array(z.string()).optional()
 }).catchall(z.any()); // Still allow any extra fields for flexibility
 
