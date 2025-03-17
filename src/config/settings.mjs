@@ -20,7 +20,7 @@ export const OPENAI_SETTINGS = {
         operations: {
             clean: "gpt-4o-mini",
             chunk: "o3-mini",
-            metadata: "gpt-4o-mini",
+            metadata: "o3-mini",
             summarize: "gpt-4o-mini",
             sentiment: "gpt-4o-mini",
             fullMetadata: "gpt-4.5-preview"
@@ -73,7 +73,7 @@ export const OPENAI_PROMPTS = {
 {
     "longDescription": "1-2 paragraphs describing the main content and arguments. Leverage transliterated Hebrew terminology for domain specific terms.",
     "keywords": ["array", "of", "key", "topics", "and", "themes"], -- specific keywords on this specific piece of text or letter, not generic like "chabad" or "jewish"
-    "questionsAnswered": ["Question?", "Answer"] -- One Q&A pair: An implied question which the text addresses. This Q&A pair will be used for future training, so please imagine it as a user's question having not seen the text at all. Provide a thorough, structured, formatted, long-form response in a conversational LLM style. The response should be well-organized, beginning with a brief summary, followed by structured key points or explanations, and concluding with a strong takeaway or final insight. Include only information that is stated in the text, and only that information which answers the question.
+    "questionsAnswered": ["Question?", "Answer"] -- One Q&A pair: An implied question which the text addresses. This Q&A pair will be used for future training, so please imagine it as a user's question having not seen the text at all, and not specifically referencing this domain per se. Provide a thorough, structured, formatted, long-form response in a conversational LLM style. The response should be well-organized, beginning with a brief summary, followed by structured key points or explanations, and concluding with a strong takeaway or final insight. Include only information that is stated in the text, and only that information which answers the question.
 }`
         }),
         chunk: (maxChunkLength, isIncomplete = false) => ({
@@ -83,7 +83,7 @@ export const OPENAI_PROMPTS = {
                 - Each subsequent chunk MUST start right after the previous chunk's ending punctuation
                 - There MUST NOT be any gaps or overlaps between chunks
                 - Include all punctuation in the chunks, making sure everything is properly escaped
-                ${isIncomplete ? '- If the text spills over past the end of the piece provided to you now, which it usually will, we will save the end of this document to prepend to the next piece we will provide you with. We will call that the "Remainder". Leave the end of the document "unchunked" and specify in the json: "remainder": true' : ''}
+                ${isIncomplete ? '- The text will likely spill over past the end of the piece provided to you now. Rather than chunking all the way to the end of this piece, we will save the end of this current piece to prepend to the next piece we will provide you with. We will call that the "Remainder". Therefore, if it seems like the document is cut off at the end, leave the end of the document "unchunked" and specify in the json: "remainder": true' : ''}
                 - If the entire text is one single theme, return a single chunk
                 - Remember that this is Hebrew text, so some characters operate differently than in English and may not indicate the end of a sentence
 
@@ -97,7 +97,7 @@ export const OPENAI_PROMPTS = {
                             "lastWords": "the lazy dog."
                         }
                     ],
-                    "remainder": false
+                    "remainder": true
                 }`
         })
     },
