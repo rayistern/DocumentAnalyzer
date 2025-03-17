@@ -933,6 +933,9 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
 
     // Track remainder text for each pre-chunk
     let remainderText = '';
+    
+    // Store cleaning responses for token usage tracking
+    let allCleanResponses = [];
 
     // If we have in-memory remainder text, use it directly
     if (isContinuation && inMemoryRemainderText !== null) {
@@ -1096,6 +1099,9 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         );
 
         console.log('Clean response received');
+        
+        // Store the clean response for token usage
+        allCleanResponses.push(cleanResponse);
         
         // Log token usage information for cleaning
         console.log(`[${new Date().toISOString()}] 📊 TOKEN USAGE for document cleaning:`, {
@@ -1355,6 +1361,16 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         const rawChunkResponse = chunkResponse.choices[0].message.content;
         console.log(`Response type: ${typeof rawChunkResponse}`);
         console.log(`Raw response (first 500 chars): ${rawChunkResponse.substring(0, 500)}...`);
+        
+        // Log token usage for chunking
+        console.log(`[${new Date().toISOString()}] 📊 TOKEN USAGE for chunking:`, {
+            prompt_tokens: chunkResponse.usage?.prompt_tokens || 'N/A',
+            completion_tokens: chunkResponse.usage?.completion_tokens || 'N/A',
+            total_tokens: chunkResponse.usage?.total_tokens || 'N/A',
+            reasoning_tokens: chunkResponse.usage?.completion_tokens_details?.reasoning_tokens || 'N/A',
+            cached_tokens: chunkResponse.usage?.prompt_tokens_details?.cached_tokens || 'N/A',
+            raw_usage_object: JSON.stringify(chunkResponse.usage)
+        });
         
         let parsedResponse;
         try {
@@ -1638,7 +1654,8 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         // Ensure chunkResult is always defined with at least empty arrays
         const chunkResult = {
             chunks: parsedResponse.chunks || [],
-            warnings: parsedResponse.warnings || []
+            warnings: parsedResponse.warnings || [],
+            tokenUsage: chunkResponse.usage
         };
         
         // Add detailed logging for remainder text
@@ -1739,7 +1756,10 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
     // Create a final chunkResult to be returned
     const finalChunkResult = {
         chunks: cleanedChunks,
-        warnings: []
+        warnings: [],
+        // Store token usage for tracking
+        tokenUsage: cleanedChunks.length > 0 && cleanedChunks[0].tokenUsage ? 
+            cleanedChunks[0].tokenUsage : null
     };
 
     // Log final remainder text details before returning
@@ -1794,6 +1814,13 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                 const lastWord = words.length > 0 ? words[words.length - 1] : '';
                 
                 console.log(`Chunk text stats: length=${cleanedText.length}, words=${words.length}, first=${firstWord}, last=${lastWord}`);
+                
+                // Include token usage from chunking API call
+                chunk.input_tokens = finalChunkResult.tokenUsage?.prompt_tokens || null;
+                chunk.output_tokens = finalChunkResult.tokenUsage?.completion_tokens || null;
+                chunk.total_tokens = finalChunkResult.tokenUsage?.total_tokens || null;
+                chunk.reasoning_tokens = finalChunkResult.tokenUsage?.completion_tokens_details?.reasoning_tokens || null;
+                chunk.cached_tokens = finalChunkResult.tokenUsage?.prompt_tokens_details?.cached_tokens || null;
                 
                 return {
                     ...chunk,
@@ -1962,12 +1989,28 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
     if (finalCleanedText && finalCleanedText.length > 0) {
         console.log(`\n[${new Date().toISOString()}] 💾 Saving final cleaned document text to the database`);
         try {
+            // Get the token usage from the first cleaning response if available
+            const tokenUsage = allCleanResponses.length > 0 ? allCleanResponses[0].usage : null;
+            
+            // Log combined token usage if we have multiple cleaning responses
+            if (allCleanResponses.length > 1) {
+                const combinedUsage = {
+                    prompt_tokens: allCleanResponses.reduce((sum, resp) => sum + (resp.usage?.prompt_tokens || 0), 0),
+                    completion_tokens: allCleanResponses.reduce((sum, resp) => sum + (resp.usage?.completion_tokens || 0), 0),
+                    total_tokens: allCleanResponses.reduce((sum, resp) => sum + (resp.usage?.total_tokens || 0), 0)
+                };
+                
+                console.log(`[${new Date().toISOString()}] 📊 COMBINED TOKEN USAGE for all cleaning operations:`, combinedUsage);
+                
+                // For detailed token tracking, we'll use the first response since combining these is more complex
+            }
+            
             await saveCleanedDocument(
                 document.id, 
                 finalCleanedText,
                 content,
                 getModelForOperation('clean'),
-                cleanResponse?.usage  // Pass token usage if available
+                tokenUsage
             );
             console.log(`[${new Date().toISOString()}] ✅ Successfully saved cleaned document text`);
         } catch (saveError) {

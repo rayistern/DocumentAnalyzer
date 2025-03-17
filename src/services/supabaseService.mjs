@@ -414,7 +414,13 @@ export async function saveAnalysis(content, type, metadata = {}) {
                         llm_suggested_end: chunk.llm_suggested_end,
                         actual_end: chunk.actual_end,
                         first_word_match: chunk.first_word_match,
-                        last_word_match: chunk.last_word_match
+                        last_word_match: chunk.last_word_match,
+                        // Add token usage fields if they exist in the chunk data
+                        input_tokens: chunk.input_tokens || null,
+                        output_tokens: chunk.output_tokens || null,
+                        total_tokens: chunk.total_tokens || null,
+                        reasoning_tokens: chunk.reasoning_tokens || null,
+                        cached_tokens: chunk.cached_tokens || null
                     };
                     
                     // Validate all fields
