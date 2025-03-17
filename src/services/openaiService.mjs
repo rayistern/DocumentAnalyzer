@@ -131,7 +131,7 @@ export async function processFile(content, type, filepath, maxChunkLength = OPEN
                 
                 // Store raw response and metadata
                 const cleanedResponse = removeMarkdownFormatting(metadataResponse.choices[0].message.content);
-                const metadata = parseJsonResponse(cleanedResponse, 'fullMetadata');
+                const metadata = parseJsonResponse(cleanedResponse, null, 'fullMetadata');
                 
                 // Create API metadata object
                 const apiMetadata = {
@@ -1764,7 +1764,7 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                                 console.log(`Received metadata response for chunk ${i+1}`);
                                 const rawResponse = metadataResponse.choices[0].message.content;
                                 const cleanedResponse = removeMarkdownFormatting(rawResponse);
-                                const metadata = parseJsonResponse(cleanedResponse, 'metadata');
+                                const metadata = parseJsonResponse(cleanedResponse, null, 'metadata');
                                 
                                 // Verify this is a valid metadata object (not a chunks object)
                                 if (metadata.chunks) {
@@ -1907,7 +1907,7 @@ export async function batchProcessFullMetadata(documentIds) {
             
             // Store raw response and metadata
             const cleanedResponse = removeMarkdownFormatting(metadataResponse.choices[0].message.content);
-            const metadata = parseJsonResponse(cleanedResponse, 'fullMetadata');
+            const metadata = parseJsonResponse(cleanedResponse, null, 'fullMetadata');
             
             // Create API metadata object
             const apiMetadata = {
