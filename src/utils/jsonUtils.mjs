@@ -113,17 +113,74 @@ export const fullMetadataSchema = z.object({
 }).catchall(z.any());
 
 export function cleanJsonResponse(text) {
-    // Find the actual JSON content
-    const start = text.indexOf('{');
-    const end = text.lastIndexOf('}') + 1;
-    if (start === -1 || end === 0) return text;
-
-
-// Set up the global timeout for all processes
-setupProcessTimeout();
-
+    // First, trim all whitespace from the beginning and end
+    const trimmedText = text.trim();
     
-    return text.slice(start, end);
+    // Find the first opening brace and the last closing brace
+    const start = trimmedText.indexOf('{');
+    const end = trimmedText.lastIndexOf('}') + 1;
+    
+    if (start === -1 || end === 0) {
+        console.log("[HEBREW-HANDLING] No JSON object found in the input");
+        return text;
+    }
+
+    // Extract just the JSON part
+    let jsonText = trimmedText.slice(start, end).trim();
+    
+    // Log the extracted JSON length for debugging
+    console.log(`[HEBREW-HANDLING] Extracted JSON from position ${start} to ${end} (length: ${jsonText.length})`);
+    
+    // Try to find the most complete and valid JSON object in the text
+    let openBraces = 0;
+    let insideString = false;
+    let isEscaped = false;
+    let possibleEndIndex = -1;
+    
+    for (let i = 0; i < jsonText.length; i++) {
+        const char = jsonText[i];
+        
+        // Handle string boundaries
+        if (char === '"' && !isEscaped) {
+            insideString = !insideString;
+        }
+        
+        // Track escape characters
+        isEscaped = char === '\\' && !isEscaped;
+        
+        // Only count braces outside of strings
+        if (!insideString) {
+            if (char === '{') openBraces++;
+            else if (char === '}') {
+                openBraces--;
+                
+                // If we've closed all opening braces, this might be the end of a valid JSON object
+                if (openBraces === 0) {
+                    possibleEndIndex = i + 1;
+                    
+                    // Test if this is valid JSON
+                    try {
+                        const testJson = jsonText.substring(0, possibleEndIndex);
+                        JSON.parse(testJson);
+                        // If we get here, it's valid JSON! We can use this end index
+                        break;
+                    } catch (e) {
+                        // Not valid yet, continue searching
+                    }
+                }
+            }
+        }
+    }
+    
+    // If we found a valid end position, use it
+    if (possibleEndIndex > 0) {
+        console.log(`[HEBREW-HANDLING] Found valid JSON object at character ${possibleEndIndex}`);
+        jsonText = jsonText.substring(0, possibleEndIndex);
+    } else if (openBraces !== 0) {
+        console.log("[HEBREW-HANDLING] Warning: Unbalanced JSON braces detected");
+    }
+    
+    return jsonText;
 }
 
 /**
@@ -267,6 +324,68 @@ export function validateWithZod(data, schemaType = 'chunk') {
 }
 
 /**
+ * Attempts to repair common JSON syntax errors
+ * 
+ * @param {string} jsonText - The potentially malformed JSON string
+ * @returns {string} - The repaired JSON string
+ */
+export function repairJson(jsonText) {
+    let repairedJson = jsonText;
+    
+    try {
+        // Try parsing as-is first
+        JSON.parse(repairedJson);
+        return repairedJson; // Already valid
+    } catch (error) {
+        console.log(`[JSON-REPAIR] Attempting to fix JSON: ${error.message}`);
+        
+        // Fix 1: Remove trailing commas in arrays and objects
+        repairedJson = repairedJson.replace(/,\s*([\]}])/g, '$1');
+        
+        // Fix 2: Try to fix unquoted property names
+        repairedJson = repairedJson.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)(\s*:)/g, '$1"$2"$3');
+        
+        // Fix 3: Try to balance quotes in strings
+        let balancedJson = '';
+        let inString = false;
+        let consecutiveQuotes = 0;
+        
+        for (let i = 0; i < repairedJson.length; i++) {
+            const char = repairedJson[i];
+            
+            if (char === '"' && (i === 0 || repairedJson[i-1] !== '\\')) {
+                inString = !inString;
+                consecutiveQuotes++;
+            } else {
+                if (consecutiveQuotes % 2 !== 0) {
+                    // Odd number of quotes, add one to balance
+                    balancedJson += '"';
+                }
+                consecutiveQuotes = 0;
+            }
+            
+            balancedJson += char;
+        }
+        
+        // If we ended inside a string, close it
+        if (inString) {
+            balancedJson += '"';
+        }
+        
+        try {
+            // See if our repairs worked
+            JSON.parse(balancedJson);
+            console.log('[JSON-REPAIR] Successfully repaired JSON');
+            return balancedJson;
+        } catch (repairError) {
+            console.log(`[JSON-REPAIR] Repair failed: ${repairError.message}`);
+            // Return the original with basic cleanup as a last resort
+            return repairedJson;
+        }
+    }
+}
+
+/**
  * Parses LLM JSON responses with multiple fallback strategies
  * 
  * IMPORTANT: Parameter order matters! Common source of bugs:
@@ -320,18 +439,42 @@ export function parseJsonResponse(jsonResponseText, cleanedText = null, schemaTy
     try {
         const extractedJson = cleanJsonResponse(jsonResponseText);
         if (extractedJson) {
-            const parsed = JSON.parse(extractedJson);
-            
-            // Validate with Zod
-            const validated = validateWithZod(parsed, schemaType);
-            if (validated) {
-                console.log("[HEBREW-HANDLING] Successfully parsed and validated extracted JSON with Zod");
-                return validated;
+            try {
+                const parsed = JSON.parse(extractedJson);
+                
+                // Validate with Zod
+                const validated = validateWithZod(parsed, schemaType);
+                if (validated) {
+                    console.log("[HEBREW-HANDLING] Successfully parsed and validated extracted JSON with Zod");
+                    return validated;
+                }
+                
+                // If Zod validation fails but JSON parsing worked, return the parsed JSON
+                console.log("[HEBREW-HANDLING] Extracted JSON parsing succeeded but Zod validation failed. Using parsed data anyway.");
+                return parsed;
+            } catch (parseError) {
+                // Try repairing the JSON
+                console.log("[HEBREW-HANDLING] Attempting to repair extracted JSON");
+                const repairedJson = repairJson(extractedJson);
+                
+                try {
+                    const parsed = JSON.parse(repairedJson);
+                    console.log("[HEBREW-HANDLING] Successfully parsed repaired JSON");
+                    
+                    // Validate with Zod
+                    const validated = validateWithZod(parsed, schemaType);
+                    if (validated) {
+                        console.log("[HEBREW-HANDLING] Successfully validated repaired JSON with Zod");
+                        return validated;
+                    }
+                    
+                    // If Zod validation fails but JSON parsing worked, return the parsed JSON
+                    console.log("[HEBREW-HANDLING] Repaired JSON parsing succeeded but Zod validation failed. Using parsed data anyway.");
+                    return parsed;
+                } catch (repairError) {
+                    console.log("[HEBREW-HANDLING] Repair attempt failed:", repairError.message);
+                }
             }
-            
-            // If Zod validation fails but JSON parsing worked, return the parsed JSON
-            console.log("[HEBREW-HANDLING] Extracted JSON parsing succeeded but Zod validation failed. Using parsed data anyway.");
-            return parsed;
         }
     } catch (error) {
         console.log("[HEBREW-HANDLING] Extracted JSON parsing failed:", error.message);

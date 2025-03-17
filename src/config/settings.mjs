@@ -112,7 +112,7 @@ export const OPENAI_PROMPTS = {
     metadata: ( isIncomplete = false) => ({
         role: "user",
         content: `Analyze the given text chunk and provide detailed metadata in JSON format. Each piece of metadata needs to be self contained, not using ambiguous references like 'the text'. ${isIncomplete ? ' Take into account the relative position of the text chunk in the flow of the document.' : ''}
-        The audience is familiar with the domain, leverage transliterated Hebrew terminology for domain specific terms, using a modern Chabad transliteration style. Aim to only include information from the text, without any conjecture.
+        The audience is familiar with the domain, retain the original Hebrew terminology for domain specific terms. Aim to only include information from the text, without any conjecture.
         Include:
     - long_summary (1-2 paragraphs, in English.)
     - short_summary (1-2 sentences, in English)

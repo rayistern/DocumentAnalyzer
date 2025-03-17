@@ -432,21 +432,44 @@ function escapeRegExp(string) {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function removeMarkdownFormatting(text) {
-    // First try to extract content between backticks if present
-    const backtickMatch = text.match(/```(?:json)?\n([\s\S]*?)\n```/);
-    if (backtickMatch) {
-        return backtickMatch[1].trim();
+/**
+ * Extracts JSON content from a markdown formatted string, typically from LLM responses.
+ * Handles both code blocks (``` delimited) and direct JSON objects ({ } delimited).
+ * 
+ * @param {string} text - The markdown-formatted text to process
+ * @returns {string} - The extracted JSON content
+ */
+export function removeMarkdownFormatting(text) {
+    if (!text) return '';
+    
+    // Trim initial input to remove leading/trailing whitespace
+    const trimmedText = text.trim();
+    console.log(`[MD-CLEANUP] Processing response of length ${trimmedText.length}`);
+    
+    // Case 1: Extract content from code blocks (between triple backticks)
+    const codeBlockRegex = /```(?:json)?\s*([\s\S]*?)\s*```/;
+    const match = trimmedText.match(codeBlockRegex);
+    
+    if (match && match[1]) {
+        const extracted = match[1].trim();
+        console.log(`[MD-CLEANUP] Extracted ${extracted.length} characters from code block`);
+        return extracted;
     }
     
-    // If no backticks, try to find the first { and last }
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-        return jsonMatch[0];
+    // Case 2: If no code blocks but starts with { and ends with }, extract JSON directly
+    // Find the first { and last } to handle stray text before/after JSON
+    const firstBrace = trimmedText.indexOf('{');
+    const lastBrace = trimmedText.lastIndexOf('}');
+    
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        const jsonContent = trimmedText.substring(firstBrace, lastBrace + 1).trim();
+        console.log(`[MD-CLEANUP] Extracted ${jsonContent.length} characters using JSON pattern detection`);
+        return jsonContent;
     }
     
-    // If neither found, return original text
-    return text;
+    // Case 3: No code blocks or obvious JSON, return the input text (trimmed)
+    console.log(`[MD-CLEANUP] No JSON pattern found, returning cleaned text of length ${trimmedText.length}`);
+    return trimmedText;
 }
 
 async function createChunks(text, maxChunkLength, filepath) {

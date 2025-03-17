@@ -131,3 +131,6 @@ Error processing metadata for chunk 3: TypeError: t.replace is not a function
 37. Clean up documentation
 38. Add a parameter somewhere where the LLM can tell us if he thinks that the text ends at a natural break.
 39. Why do we have so many single letters or sub words as first_word or last_word in the chunks table?
+40. Remove unused and likely erroneous processes: createChunks, summarize, sentiment, etc.
+41. Still getting fields at end of qa pair
+42. Maybe its taking transliteration a bit too intensly
