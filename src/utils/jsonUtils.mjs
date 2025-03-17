@@ -339,13 +339,50 @@ export function repairJson(jsonText) {
     } catch (error) {
         console.log(`[JSON-REPAIR] Attempting to fix JSON: ${error.message}`);
         
-        // Fix 1: Remove trailing commas in arrays and objects
+        // Fix 1: Apply control character cleaning again to be safe
+        repairedJson = cleanControlCharacters(repairedJson);
+        
+        // Fix 2: Remove trailing commas in arrays and objects
         repairedJson = repairedJson.replace(/,\s*([\]}])/g, '$1');
         
-        // Fix 2: Try to fix unquoted property names
+        // Fix 3: Try to fix unquoted property names
         repairedJson = repairedJson.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)(\s*:)/g, '$1"$2"$3');
         
-        // Fix 3: Try to balance quotes in strings
+        // Fix 4: Attempt to fix the specific qa_pair issue
+        // Handle erroneous nesting of fields inside qa_pair
+        if (repairedJson.includes('"qa_pair"') && 
+            (repairedJson.includes('"potential_typos"') || 
+             repairedJson.includes('"identified_abbreviations"') || 
+             repairedJson.includes('"named_entities"'))) {
+            
+            try {
+                // First find the "answer" field in qa_pair
+                const answerMatch = repairedJson.match(/"answer"\s*:\s*"([^"]*)"/);
+                if (answerMatch) {
+                    // Find the position after the answer value
+                    const posAfterAnswer = repairedJson.indexOf(answerMatch[0]) + answerMatch[0].length;
+                    
+                    // Check if potential_typos comes after that
+                    const afterAnswer = repairedJson.substring(posAfterAnswer);
+                    
+                    if (afterAnswer.match(/,\s*"(potential_typos|identified_abbreviations|named_entities)"/)) {
+                        // Structure is already correct
+                        console.log('[JSON-REPAIR] qa_pair structure appears correct');
+                    } else if (afterAnswer.match(/"(potential_typos|identified_abbreviations|named_entities)"/)) {
+                        // Close qa_pair before these fields
+                        const beforeFields = repairedJson.substring(0, posAfterAnswer);
+                        const afterFields = repairedJson.substring(posAfterAnswer);
+                        
+                        repairedJson = beforeFields + '},' + afterFields;
+                        console.log('[JSON-REPAIR] Fixed qa_pair structure by adding closing brace');
+                    }
+                }
+            } catch (structureError) {
+                console.log(`[JSON-REPAIR] Error fixing qa_pair structure: ${structureError.message}`);
+            }
+        }
+        
+        // Fix 5: Try to balance quotes in strings
         let balancedJson = '';
         let inString = false;
         let consecutiveQuotes = 0;
@@ -378,9 +415,45 @@ export function repairJson(jsonText) {
             console.log('[JSON-REPAIR] Successfully repaired JSON');
             return balancedJson;
         } catch (repairError) {
-            console.log(`[JSON-REPAIR] Repair failed: ${repairError.message}`);
-            // Return the original with basic cleanup as a last resort
-            return repairedJson;
+            console.log(`[JSON-REPAIR] First repair attempt failed: ${repairError.message}`);
+            
+            // Last resort: Try to extract just the valid part of the JSON
+            try {
+                // Find the first { and try to extract a complete JSON object
+                const startBrace = balancedJson.indexOf('{');
+                if (startBrace >= 0) {
+                    let openBraces = 1;
+                    let validEndPos = -1;
+                    
+                    for (let i = startBrace + 1; i < balancedJson.length; i++) {
+                        const char = balancedJson[i];
+                        if (char === '{') openBraces++;
+                        else if (char === '}') {
+                            openBraces--;
+                            if (openBraces === 0) {
+                                validEndPos = i + 1;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (validEndPos > 0) {
+                        const extractedJson = balancedJson.substring(startBrace, validEndPos);
+                        try {
+                            JSON.parse(extractedJson);
+                            console.log('[JSON-REPAIR] Successfully extracted valid JSON subset');
+                            return extractedJson;
+                        } catch (extractError) {
+                            console.log(`[JSON-REPAIR] Failed to extract valid JSON: ${extractError.message}`);
+                        }
+                    }
+                }
+            } catch (extractionError) {
+                console.log(`[JSON-REPAIR] JSON extraction error: ${extractionError.message}`);
+            }
+            
+            // Return the balanced version as our best effort
+            return balancedJson;
         }
     }
 }
@@ -430,97 +503,128 @@ export function fixMetadataStructure(parsedObject) {
 }
 
 /**
- * Preprocesses raw JSON text to fix common structure issues
- * before any parsing attempts
+ * Cleanses invalid control characters from JSON string before parsing
  * 
- * @param {string} jsonText - The raw JSON text to preprocess
- * @param {string} schemaType - The type of schema ('metadata', 'chunk', etc.)
- * @returns {string} - The preprocessed JSON string
+ * @param {string} text - The raw JSON string that might contain control characters
+ * @returns {string} - The cleaned JSON string with control characters removed
  */
-export function preprocessJsonText(jsonText, schemaType) {
-    if (!jsonText || typeof jsonText !== 'string') {
-        return jsonText;
-    }
-
-    let processed = jsonText;
+export function cleanControlCharacters(text) {
+    if (!text) return text;
     
-    if (schemaType === 'metadata') {
-        // Fix issue where fields are incorrectly nested within qa_pair
-        
-        // First try to detect the pattern of qa_pair with extra fields
-        const qaFieldsPattern = /"qa_pair"\s*:\s*{[\s\S]*?("potential_typos"|"identified_abbreviations"|"named_entities")/;
-        
-        if (qaFieldsPattern.test(processed)) {
-            console.log("[JSON-PREPROCESS] Detected incorrectly nested fields in qa_pair");
-            
-            try {
-                // Try to parse the string to a temporary object to extract fields safely
-                const tempObj = JSON.parse(processed);
+    // Step 1: Replace all ASCII control characters (0-31) except tabs, newlines and carriage returns
+    let cleanedText = text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ' ');
+    
+    // Step 2: Handle escaped control characters that might appear as "\u00XX" in the JSON
+    cleanedText = cleanedText.replace(/\\u00([01][0-9A-Fa-f])/g, ' ');
+    
+    // Step 3: Special handling for answer field which often contains problematic content
+    // The "answer" field in qa_pair is the most common source of control character errors
+    try {
+        // First try to find and extract the qa_pair block
+        const qaBlockStart = cleanedText.indexOf('"qa_pair"');
+        if (qaBlockStart >= 0) {
+            // Find the answer field inside the qa_pair
+            const answerStart = cleanedText.indexOf('"answer"', qaBlockStart);
+            if (answerStart >= 0) {
+                // Find the starting quote of the answer value
+                const valueStart = cleanedText.indexOf(':', answerStart) + 1;
+                const valueQuote = cleanedText.indexOf('"', valueStart);
                 
-                // If we have a qa_pair object with extra fields
-                if (tempObj.qa_pair && typeof tempObj.qa_pair === 'object') {
-                    const { question, answer, ...extraFields } = tempObj.qa_pair;
+                if (valueQuote >= 0) {
+                    // Find the ending quote of the answer
+                    let endQuote = -1;
+                    let pos = valueQuote + 1;
+                    let escaped = false;
                     
-                    // If there are extra fields that should be at root level
-                    if (extraFields.potential_typos || extraFields.identified_abbreviations || extraFields.named_entities) {
-                        console.log("[JSON-PREPROCESS] Extracting fields from qa_pair via object manipulation");
+                    while (pos < cleanedText.length) {
+                        const char = cleanedText[pos];
                         
-                        // Create a new object with fixed structure
-                        const fixedObj = {
-                            ...tempObj,
-                            qa_pair: { question, answer }
-                        };
-                        
-                        // Move the extra fields to the root
-                        if (extraFields.potential_typos) {
-                            fixedObj.potential_typos = extraFields.potential_typos;
-                        }
-                        if (extraFields.identified_abbreviations) {
-                            fixedObj.identified_abbreviations = extraFields.identified_abbreviations;
-                        }
-                        if (extraFields.named_entities) {
-                            fixedObj.named_entities = extraFields.named_entities;
+                        if (char === '\\') {
+                            escaped = !escaped;
+                        } else if (char === '"' && !escaped) {
+                            endQuote = pos;
+                            break;
+                        } else {
+                            escaped = false;
                         }
                         
-                        // Convert back to JSON string
-                        processed = JSON.stringify(fixedObj);
-                        console.log("[JSON-PREPROCESS] Successfully restructured qa_pair via object manipulation");
-                        return processed; // Return early since we've fixed the issue
+                        pos++;
+                    }
+                    
+                    if (endQuote > 0) {
+                        // Extract the answer content
+                        const answerContent = cleanedText.substring(valueQuote + 1, endQuote);
+                        
+                        // Clean the answer content
+                        const cleanedAnswer = answerContent
+                            .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ' ')         // Control chars
+                            .replace(/\\u00([01][0-9A-Fa-f])/g, ' ')                // Escaped control chars  
+                            .replace(/\\([^"\\\/bfnrt])/g, '\\\\$1')                // Escape invalid escape sequences
+                            .replace(/(?<!\\)"/g, '\\"');                          // Escape any unescaped quotes
+                        
+                        // Replace the answer in the original text
+                        cleanedText = 
+                            cleanedText.substring(0, valueQuote + 1) + 
+                            cleanedAnswer + 
+                            cleanedText.substring(endQuote);
+                            
+                        console.log("[JSON-CLEAN] Deep cleaned the answer field content");
                     }
                 }
-            } catch (parseError) {
-                console.log("[JSON-PREPROCESS] Could not parse for direct object manipulation:", parseError.message);
-                // Continue with regex-based approach as fallback
             }
+        }
+    } catch (answerCleanError) {
+        console.log("[JSON-CLEAN] Error during deep answer cleaning:", answerCleanError.message);
+        // Continue with other cleaning
+    }
+    
+    // Step 4: Fix specific issues with the qa_pair structure if this is a metadata response
+    // Only do this if we find a qa_pair field and potential_typos/etc. outside the proper JSON structure
+    const qaPattern = /"qa_pair"\s*:\s*{[^}]*"answer"\s*:[^}]*}/;
+    const fieldAfterQaPair = /"qa_pair"\s*:\s*{[^}]*}\s*,\s*"(potential_typos|identified_abbreviations|named_entities)"/;
+    
+    if (qaPattern.test(cleanedText) && !fieldAfterQaPair.test(cleanedText)) {
+        // Find problematic pattern where fields are inside qa_pair
+        const nestedFieldsPattern = /"qa_pair"\s*:\s*{[^}]*"answer"\s*:[^}]*"(potential_typos|identified_abbreviations|named_entities)"/;
+        
+        if (nestedFieldsPattern.test(cleanedText)) {
+            console.log("[JSON-CLEAN] Detected and fixing nested fields in qa_pair");
             
-            // Fallback to regex-based approach
-            try {
-                // Find qa_pair block and extract only question and answer
-                // This more complex regex safely captures the question and answer values
-                const extractQaPairRegex = /"qa_pair"\s*:\s*{[^}]*?"question"\s*:\s*"((?:\\"|[^"])*)"[^}]*?"answer"\s*:\s*"((?:\\"|[^"])*)"/;
-                const qaMatch = extractQaPairRegex.exec(processed);
+            // Find the end of the answer field
+            const answerEndMatch = cleanedText.match(/"answer"\s*:\s*"((?:\\"|[^"])*)"/);
+            if (answerEndMatch) {
+                const answerEndPos = cleanedText.indexOf(answerEndMatch[0]) + answerEndMatch[0].length;
                 
-                if (qaMatch) {
-                    const question = qaMatch[1];
-                    const answer = qaMatch[2];
-                    
-                    // Create a clean qa_pair section
-                    const cleanQaPair = `"qa_pair": {"question": "${question}", "answer": "${answer}"}`;
-                    
-                    // Replace the original qa_pair section with our clean version
-                    processed = processed.replace(
-                        /"qa_pair"\s*:\s*{[^{]*?("question"[^}]*?"answer"[^}]*?)("potential_typos"|"identified_abbreviations"|"named_entities")/,
-                        `${cleanQaPair},\n$2`
-                    );
-                    console.log("[JSON-PREPROCESS] Applied regex-based qa_pair structure fix");
-                }
-            } catch (regexError) {
-                console.log("[JSON-PREPROCESS] Regex extraction failed:", regexError.message);
+                // Cut the string at this position and add closing brace for qa_pair
+                const beforeFields = cleanedText.substring(0, answerEndPos);
+                const afterFields = cleanedText.substring(answerEndPos);
+                
+                // Close the qa_pair object and continue with potential_typos outside it
+                cleanedText = beforeFields + '},' + afterFields.replace(/"\s*,\s*"(potential_typos|identified_abbreviations|named_entities)/, '"$1');
+                
+                console.log("[JSON-CLEAN] Fixed nested fields structure");
             }
         }
     }
     
-    return processed;
+    // Step 5: Final specialized handling for well-known error patterns in the JSON response
+    if (cleanedText.includes('"answer":') && cleanedText.includes('"potential_typos":')) {
+        // Check for missing closing brace in qa_pair
+        const problemPattern = /"answer"\s*:\s*"[^"]*"\s*,\s*"potential_typos"/;
+        if (problemPattern.test(cleanedText)) {
+            console.log("[JSON-CLEAN] Detected missing qa_pair closing brace");
+            
+            // Add the missing closing brace and comma
+            cleanedText = cleanedText.replace(/"answer"\s*:\s*"([^"]*)"\s*,\s*"potential_typos"/, '"answer": "$1"},"potential_typos"');
+            console.log("[JSON-CLEAN] Added missing closing brace for qa_pair");
+        }
+    }
+    
+    if (cleanedText !== text) {
+        console.log("[JSON-CLEAN] Cleaned problematic characters or structure in JSON string");
+    }
+    
+    return cleanedText;
 }
 
 /**
@@ -553,14 +657,12 @@ export function preprocessJsonText(jsonText, schemaType) {
  * @returns {Object} Parsed response object according to the specified schema type
  */
 export function parseJsonResponse(jsonResponseText, cleanedText = null, schemaType = 'chunk') {
-    // Preprocess the JSON text to fix common structure issues
-    const preprocessedJson = preprocessJsonText(jsonResponseText, schemaType);
-    
-    let parsedResponse;
+    // First clean any control characters that would break JSON parsing
+    const sanitizedJson = cleanControlCharacters(jsonResponseText);
     
     // First attempt: Try standard JSON.parse with Zod validation
     try {
-        const parsed = JSON.parse(preprocessedJson);
+        const parsed = JSON.parse(sanitizedJson);
         
         // Fix metadata structure if applicable
         const fixedParsed = schemaType === 'metadata' ? fixMetadataStructure(parsed) : parsed;
@@ -581,7 +683,7 @@ export function parseJsonResponse(jsonResponseText, cleanedText = null, schemaTy
     
     // Second attempt: Extract JSON part and try to parse with Zod
     try {
-        const extractedJson = cleanJsonResponse(preprocessedJson);
+        const extractedJson = cleanJsonResponse(sanitizedJson);
         if (extractedJson) {
             try {
                 const parsed = JSON.parse(extractedJson);
@@ -631,9 +733,9 @@ export function parseJsonResponse(jsonResponseText, cleanedText = null, schemaTy
     }
     
     // Third attempt: Fallback to string-based extraction
-    console.log("[HEBREW-HANDLING] Attempting string-based chunk extraction");
     if (schemaType === 'chunk') {
-        const extractedChunks = extractChunksFromString(preprocessedJson);
+        console.log("[HEBREW-HANDLING] Attempting string-based chunk extraction");
+        const extractedChunks = extractChunksFromString(sanitizedJson);
         
         if (extractedChunks.chunks && extractedChunks.chunks.length > 0) {
             console.log(`[HEBREW-HANDLING] Successfully extracted ${extractedChunks.chunks.length} chunks using string-based approach`);
@@ -649,13 +751,146 @@ export function parseJsonResponse(jsonResponseText, cleanedText = null, schemaTy
             return extractedChunks;
         }
     } else if (schemaType === 'metadata' || schemaType === 'fullMetadata') {
-        // For metadata, simply return the parsed object since string extraction
-        // is primarily designed for chunks, not metadata objects
-        console.log(`[HEBREW-HANDLING] Skipping string-based extraction for ${schemaType} and using parsed data as-is`);
+        // For metadata, try aggressive recovery with regex extraction
+        console.log(`[HEBREW-HANDLING] Attempting aggressive metadata extraction for ${schemaType}`);
+        
+        try {
+            // More aggressive JSON recovery for metadata fields
+            const recoveredMetadata = {};
+            
+            // Define patterns for each key field type
+            const stringFieldPatterns = [
+                { field: 'long_summary', pattern: /"long_summary"\s*:\s*"((?:\\"|[^"])*)"/i },
+                { field: 'short_summary', pattern: /"short_summary"\s*:\s*"((?:\\"|[^"])*)"/i },
+                { field: 'generated_title', pattern: /"generated_title"\s*:\s*"((?:\\"|[^"])*)"/i }
+            ];
+            
+            // Try to extract the string fields
+            stringFieldPatterns.forEach(({field, pattern}) => {
+                const match = sanitizedJson.match(pattern);
+                if (match && match[1]) {
+                    recoveredMetadata[field] = match[1].replace(/\\"/g, '"');
+                    console.log(`[HEBREW-HANDLING] Recovered ${field} field through regex`);
+                }
+            });
+            
+            // Array fields follow a pattern like "field": ["item1", "item2"]
+            const arrayFieldPatterns = [
+                { field: 'quiz_questions', pattern: /"quiz_questions"\s*:\s*\[(.*?)\]/is },
+                { field: 'followup_thinking_questions', pattern: /"followup_thinking_questions"\s*:\s*\[(.*?)\]/is },
+                { field: 'tags_he', pattern: /"tags_he"\s*:\s*\[(.*?)\]/is },
+                { field: 'key_terms_he', pattern: /"key_terms_he"\s*:\s*\[(.*?)\]/is },
+                // Add missing array fields
+                { field: 'key_phrases_he', pattern: /"key_phrases_he"\s*:\s*\[(.*?)\]/is },
+                { field: 'key_phrases_en', pattern: /"key_phrases_en"\s*:\s*\[(.*?)\]/is },
+                { field: 'questions_implied', pattern: /"questions_implied"\s*:\s*\[(.*?)\]/is },
+                { field: 'potential_typos', pattern: /"potential_typos"\s*:\s*\[(.*?)\]/is },
+                { field: 'named_entities', pattern: /"named_entities"\s*:\s*\[(.*?)\]/is }
+            ];
+            
+            // Extract array fields
+            arrayFieldPatterns.forEach(({field, pattern}) => {
+                const match = sanitizedJson.match(pattern);
+                if (match && match[1]) {
+                    try {
+                        // Convert the array content to proper JSON
+                        const arrayContent = `[${match[1]}]`;
+                        const fixedArray = arrayContent
+                            .replace(/'/g, '"')  // Replace single quotes with double quotes
+                            .replace(/",\s*]/g, '"]'); // Fix trailing commas
+                            
+                        recoveredMetadata[field] = JSON.parse(fixedArray);
+                        console.log(`[HEBREW-HANDLING] Recovered ${field} array through regex`);
+                    } catch (arrayError) {
+                        console.log(`[HEBREW-HANDLING] Could not parse ${field} array: ${arrayError.message}`);
+                        // Create a basic array with the content as a single item
+                        recoveredMetadata[field] = [match[1].replace(/"/g, '').trim()];
+                    }
+                }
+            });
+            
+            // Special handling for complex objects like bibliography_snippets and identified_abbreviations
+            try {
+                // Try to extract bibliography_snippets
+                const bibliographyMatch = sanitizedJson.match(/"bibliography_snippets"\s*:\s*\[(.*?)\]/is);
+                if (bibliographyMatch && bibliographyMatch[1]) {
+                    try {
+                        // Create a valid JSON array
+                        const jsonStr = `[${bibliographyMatch[1]}]`;
+                        const parsed = JSON.parse(jsonStr);
+                        recoveredMetadata.bibliography_snippets = parsed;
+                        // Also add as bibliography_snippets_jsonb since they're the same
+                        recoveredMetadata.bibliography_snippets_jsonb = parsed;
+                        console.log(`[HEBREW-HANDLING] Recovered bibliography_snippets through regex`);
+                    } catch (e) {
+                        console.log(`[HEBREW-HANDLING] Could not parse bibliography_snippets: ${e.message}`);
+                    }
+                }
+                
+                // Try to extract identified_abbreviations
+                const abbreviationsMatch = sanitizedJson.match(/"identified_abbreviations"\s*:\s*\[(.*?)\]/is);
+                if (abbreviationsMatch && abbreviationsMatch[1]) {
+                    try {
+                        // Create a valid JSON array
+                        const jsonStr = `[${abbreviationsMatch[1]}]`;
+                        const parsed = JSON.parse(jsonStr);
+                        recoveredMetadata.identified_abbreviations = parsed;
+                        // Also add as identified_abbreviations_jsonb since they're the same
+                        recoveredMetadata.identified_abbreviations_jsonb = parsed;
+                        console.log(`[HEBREW-HANDLING] Recovered identified_abbreviations through regex`);
+                    } catch (e) {
+                        console.log(`[HEBREW-HANDLING] Could not parse identified_abbreviations: ${e.message}`);
+                    }
+                }
+            } catch (complexObjectError) {
+                console.log(`[HEBREW-HANDLING] Error handling complex objects: ${complexObjectError.message}`);
+            }
+            
+            // Try to extract qa_pair as a special case
+            const questionMatch = sanitizedJson.match(/"question"\s*:\s*"((?:\\"|[^"])*)"/i);
+            const answerMatch = sanitizedJson.match(/"answer"\s*:\s*"((?:\\"|[^"])*)"/i);
+            
+            if (questionMatch && questionMatch[1] && answerMatch && answerMatch[1]) {
+                recoveredMetadata.qa_pair = {
+                    question: questionMatch[1].replace(/\\"/g, '"'),
+                    answer: answerMatch[1].replace(/\\"/g, '"')
+                };
+                console.log(`[HEBREW-HANDLING] Recovered qa_pair through regex`);
+            }
+            
+            // If we recovered any fields, try to construct a valid JSON object and validate with Zod
+            const recoveredFields = Object.keys(recoveredMetadata);
+            if (recoveredFields.length > 0) {
+                console.log(`[HEBREW-HANDLING] Successfully recovered ${recoveredFields.length} metadata fields through aggressive extraction`);
+                console.log(`[HEBREW-HANDLING] Recovered fields: ${recoveredFields.join(', ')}`);
+                
+                // Try to validate our constructed metadata with Zod
+                try {
+                    // First fix metadata structure if applicable
+                    const fixedMetadata = schemaType === 'metadata' ? fixMetadataStructure(recoveredMetadata) : recoveredMetadata;
+                    
+                    // Validate with Zod
+                    const validated = validateWithZod(fixedMetadata, schemaType);
+                    if (validated) {
+                        console.log("[HEBREW-HANDLING] Successfully validated regex-extracted metadata with Zod");
+                        return validated;
+                    }
+                } catch (zodError) {
+                    console.log(`[HEBREW-HANDLING] Regex-extracted metadata validation failed: ${zodError.message}`);
+                }
+                
+                // If validation fails or errors, still return the recovered metadata
+                return recoveredMetadata;
+            }
+        } catch (aggressiveRecoveryError) {
+            console.log(`[HEBREW-HANDLING] Aggressive metadata recovery failed: ${aggressiveRecoveryError.message}`);
+        }
+        
+        // One final attempt - try cleaning and parsing again
         try {
             // Attempt one more clean parse
-            const cleanedJson = cleanJsonResponse(preprocessedJson);
-            const parsedMetadata = JSON.parse(cleanedJson || preprocessedJson);
+            const cleanedJson = cleanJsonResponse(sanitizedJson);
+            const parsedMetadata = JSON.parse(cleanedJson || sanitizedJson);
             
             // Verify this is actually a metadata object and not a chunks object
             if (parsedMetadata.chunks) {
@@ -671,6 +906,18 @@ export function parseJsonResponse(jsonResponseText, cleanedText = null, schemaTy
             // Fix metadata structure if applicable
             if (schemaType === 'metadata') {
                 const fixedMetadata = fixMetadataStructure(parsedMetadata);
+                
+                // Try Zod validation one more time
+                try {
+                    const validated = validateWithZod(fixedMetadata, schemaType);
+                    if (validated) {
+                        console.log(`[HEBREW-HANDLING] Successfully validated final attempt ${schemaType} with Zod`);
+                        return validated;
+                    }
+                } catch (finalZodError) {
+                    console.log(`[HEBREW-HANDLING] Final Zod validation failed: ${finalZodError.message}`);
+                }
+                
                 console.log(`[HEBREW-HANDLING] Applied structure fixes to ${schemaType} response`);
                 return fixedMetadata;
             }

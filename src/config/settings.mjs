@@ -114,22 +114,22 @@ export const OPENAI_PROMPTS = {
         content: `Analyze the given text chunk and provide detailed metadata in JSON format. Each piece of metadata needs to be self contained, not using ambiguous references like 'the text'. ${isIncomplete ? ' Take into account the relative position of the text chunk in the flow of the document.' : ''}
         The audience is familiar with the domain, retain the original Hebrew terminology for domain specific terms. Aim to only include information from the text, without any conjecture.
         Include:
-    - long_summary (1-2 paragraphs, in English.)
-    - short_summary (1-2 sentences, in English)
-    - quiz_questions (3-5 questions in English. Make sure these can be used standalone and do not ambiguously reference the text.)
-    - followup_thinking_questions (2-3 deeper analytical questions, in English)
-    - generated_title (in English)
-    - tags_he (Hebrew, keywords)
-    - key_terms_he (domain specific terms/phrases, in the original Hebrew)
-    - key_phrases_he (important Hebrew quotes)
-    - key_phrases_en (English translations of key phrases)
-    - bibliography_snippets (array of citations and references. These will usually not be explicitly stated in the text, rather you should identify quoted text and identify the source. {snippet, source}, Hebrew)
-    - questions_explicit (directly stated in text, Original Hebrew verbatim)
-    - questions_implied (suggested by the content, English)
-    - qa_pair (One Q&A pair: An implied question which the text addresses. This Q&A pair will be used for future training, so please imagine it as a user's question having not seen the text at all, and not specifically referencing this domain per se. Provide a thorough, structured, formatted, long-form response in a conversational LLM style. The response should be well-organized, beginning with a brief summary, followed by structured key points or explanations, and concluding with a strong takeaway or final insight. Include only information that is stated in the text, and only that information which answers the question.)
-    - potential_typos (array of possible errors, Original Hebrew)
-    - identified_abbreviations (array of abbreviations with expansions, Original Hebrew)
-    - named_entities (array of people, places, texts mentioned, Original Hebrew)
+    - long_summary (1-2 paragraphs, in English.) "string"
+    - short_summary (1-2 sentences, in English) "string"
+    - quiz_questions (3-5 questions in English. Make sure these can be used standalone and do not ambiguously reference the text.) "[string]"
+    - followup_thinking_questions (2-3 deeper analytical questions, in English) "[string]"
+    - generated_title (in English) "string"
+    - tags_he (Hebrew, keywords) "[string]"
+    - key_terms_he (domain specific terms/phrases, in the original Hebrew) "[string]"
+    - key_phrases_he (important Hebrew quotes) "[string]"
+    - key_phrases_en (English translations of key phrases) "[string]"
+    - bibliography_snippets (array of citations and references. These will usually not be explicitly stated in the text, rather you should identify quoted text and identify the source. {snippet, source}, Hebrew) [{"snippet": "string", "source": "string"}]
+    - questions_explicit (directly stated in text, Original Hebrew verbatim) ["string"]
+    - questions_implied (suggested by the content, English) ["string"]
+    - qa_pair (One Q&A pair: An implied question which the text addresses. This Q&A pair will be used for future training, so please imagine it as a user's question having not seen the text at all, and not specifically referencing this domain per se. Provide a thorough, structured, formatted, long-form response in a conversational LLM style. The response should be well-organized, beginning with a brief summary, followed by structured key points or explanations, and concluding with a strong takeaway or final insight. Include only information that is stated in the text, and only that information which answers the question.) {"question": "string", "answer": "string"}
+    - potential_typos (array of possible errors, Original Hebrew) ["string"]
+    - identified_abbreviations (array of abbreviations with expansions, Original Hebrew) [{"abbreviation": "string", "expansion": "string"}]
+    - named_entities (array of people, places, texts mentioned, Original Hebrew) ["string"]
 
 Return valid JSON only, no markdown.
 
