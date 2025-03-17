@@ -346,15 +346,44 @@ export function parseJsonResponse(jsonResponseText, cleanedText, schemaType = 'c
             // Attempt one more clean parse
             const cleanedJson = cleanJsonResponse(jsonResponseText);
             const parsedMetadata = JSON.parse(cleanedJson || jsonResponseText);
+            
+            // Verify this is actually a metadata object and not a chunks object
+            if (parsedMetadata.chunks) {
+                console.log(`[HEBREW-HANDLING] Warning: Parsed ${schemaType} response contains 'chunks' field, which suggests incorrect structure`);
+                // Return a minimal metadata structure
+                return {
+                    long_summary: "Response contained chunks instead of metadata",
+                    short_summary: "Incorrect response structure",
+                    generated_title: "Metadata Structure Error"
+                };
+            }
+            
             return parsedMetadata;
         } catch (error) {
             console.log(`[HEBREW-HANDLING] Final JSON parsing attempt failed for ${schemaType}:`, error.message);
-            // Return an empty object to avoid null errors
-            return {};
+            // Return a minimal metadata object to avoid null errors
+            return {
+                long_summary: `Failed to parse ${schemaType} response: ${error.message}`,
+                short_summary: "JSON parsing error",
+                generated_title: "Metadata Parsing Error"
+            };
         }
     }
     
-    // Final fallback: Create a single document chunk
-    console.log("[HEBREW-HANDLING] All parsing attempts failed. Creating single document chunk.");
-    return createSingleDocumentChunk(cleanedText);
+    // Final fallback: Create appropriate empty object based on schema type
+    if (schemaType === 'chunk') {
+        console.log("[HEBREW-HANDLING] All parsing attempts failed. Creating single document chunk.");
+        return createSingleDocumentChunk(cleanedText);
+    } else if (schemaType === 'metadata' || schemaType === 'fullMetadata') {
+        console.log(`[HEBREW-HANDLING] All parsing attempts failed. Creating empty ${schemaType} object.`);
+        // Return empty metadata object with minimum required structure
+        return {
+            long_summary: "Failed to parse metadata response",
+            short_summary: "Parsing error",
+            generated_title: "Metadata Parsing Error"
+        };
+    } else {
+        console.log(`[HEBREW-HANDLING] All parsing attempts failed. Creating empty object for ${schemaType}.`);
+        return {};
+    }
 } 

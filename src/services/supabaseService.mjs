@@ -562,7 +562,7 @@ export async function saveCleanedDocument(documentId, cleanedText, originalText,
     }
 }
 
-export async function saveChunkMetadata(documentId, chunkIndex, metadata, modelUsed = null) {
+export async function saveChunkMetadata(documentId, chunkIndex, metadata, modelUsed = null, rawLLMResponse = null) {
     try {
         console.log(`Saving metadata for document ${documentId}, chunk ${chunkIndex}...`);
         
@@ -572,6 +572,11 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata, modelU
         // Log the model used if provided
         if (modelUsed) {
             console.log(`Model used for metadata: ${modelUsed}`);
+        }
+        
+        // Log if we have raw LLM response
+        if (rawLLMResponse) {
+            console.log(`Raw LLM response saved for chunk ${chunkIndex}: ${rawLLMResponse.length} characters`);
         }
         
         // Map LLM response fields to database fields if needed
@@ -636,7 +641,8 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata, modelU
             potential_typos: Array.isArray(mappedMetadata.potential_typos) ? `{${mappedMetadata.potential_typos.map(t => typeof t === 'string' ? `"${t.replace(/"/g, '\\"')}"` : `"${String(t)}"`).join(',')}}` : null,
             named_entities: Array.isArray(mappedMetadata.named_entities) ? `{${mappedMetadata.named_entities.map(e => typeof e === 'string' ? `"${e.replace(/"/g, '\\"')}"` : `"${String(e)}"`).join(',')}}` : null,
             created_at: new Date().toISOString(),
-            model_used: modelUsed // Add the model used
+            model_used: modelUsed, // Add the model used
+            raw_llm_response: rawLLMResponse // Store the raw LLM response
         };
 
         // Log metadata fields before saving

@@ -1762,14 +1762,40 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                                 );
                                 
                                 console.log(`Received metadata response for chunk ${i+1}`);
-                                const cleanedResponse = removeMarkdownFormatting(metadataResponse.choices[0].message.content);
+                                const rawResponse = metadataResponse.choices[0].message.content;
+                                const cleanedResponse = removeMarkdownFormatting(rawResponse);
                                 const metadata = parseJsonResponse(cleanedResponse, 'metadata');
+                                
+                                // Verify this is a valid metadata object (not a chunks object)
+                                if (metadata.chunks) {
+                                    console.error(`❌ ERROR: Metadata for chunk ${i+1} was parsed as a chunks object instead of metadata`);
+                                    console.log(`Response structure:`, Object.keys(metadata));
+                                    // Continue with the next chunk, but still save the raw response
+                                    await saveChunkMetadata(
+                                        document.id, 
+                                        i, 
+                                        {
+                                            long_summary: "Error: Response contained chunks instead of metadata",
+                                            short_summary: "Parsing error",
+                                            generated_title: "Metadata Structure Error"
+                                        }, 
+                                        metadataResponse.model,
+                                        rawResponse  // Save the raw response even on error
+                                    );
+                                    continue;
+                                }
                                 
                                 // Add model information to the metadata
                                 console.log(`Model used for metadata: ${metadataResponse.model}`);
                                 
-                                // Save the metadata with model information
-                                await saveChunkMetadata(document.id, i, metadata, metadataResponse.model);
+                                // Save the metadata with model information and raw response
+                                await saveChunkMetadata(
+                                    document.id, 
+                                    i, 
+                                    metadata, 
+                                    metadataResponse.model,
+                                    rawResponse  // Save the raw response
+                                );
                                 console.log(`✅ Saved metadata for chunk ${i+1} using model: ${metadataResponse.model}`);
                             } else {
                                 console.log(`⚠️ Skipping metadata for chunk ${i+1} - no valid content`);

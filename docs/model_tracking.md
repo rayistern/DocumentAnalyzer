@@ -1,45 +1,75 @@
-# Model Tracking in Document Analyzer
+# Model Tracking and Response Logging in Document Analyzer
 
 ## Overview
-A new feature has been added to track which LLM model was used during the metadata generation step. This information is stored in the `model_used` column of the `chunk_metadata` table.
+Two new features have been added to improve metadata tracking and debugging:
+1. The `model_used` column tracks which LLM model was used during metadata generation
+2. The `raw_llm_response` column stores the complete unmodified LLM response for debugging parsing failures
 
 ## Implementation Details
 
 ### Database Changes
 - Added a new `model_used` TEXT column to the `chunk_metadata` table
+- Added a new `raw_llm_response` TEXT column to store the raw LLM response
 
 ### Code Changes
-- Updated the `saveChunkMetadata` function in `src/services/supabaseService.mjs` to accept and store the model information
-- Modified the metadata processing code in `src/services/openaiService.mjs` to pass the model information from the API response
+- Updated the `saveChunkMetadata` function to accept and store model information and raw responses
+- Modified the metadata processing code to pass the model information and raw response
 
 ## How to Use
-The model information is automatically captured from the OpenAI API response and stored in the database. You can query this information to:
+The system now automatically captures:
+- The LLM model name from the API response
+- The complete raw LLM response for debugging
 
-- Track which model was used for each chunk's metadata generation
-- Analyze performance or quality differences between different models
-- Debug issues related to specific models
+### Benefits
+- Track which model generated which metadata
+- Debug JSON parsing failures by examining the raw responses
+- Analyze model performance differences
+- Identify problematic responses that cause parsing errors
 
 ## Migration
-A migration script has been created at `DocumentAnalyzer/migrations/add_model_used_column.sql` to add the new column to the database.
+Two migration scripts have been created:
+1. `DocumentAnalyzer/migrations/add_model_used_column.sql` - Adds the model tracking column
+2. `DocumentAnalyzer/migrations/add_raw_llm_response_column.sql` - Adds the raw response storage column
 
-To run the migration:
+To run the migrations:
 ```sql
--- Run this script to add the model_used column to the chunk_metadata table
+-- Run these scripts to add the new columns to the chunk_metadata table
 psql -U <your_username> -d <your_database> -f DocumentAnalyzer/migrations/add_model_used_column.sql
+psql -U <your_username> -d <your_database> -f DocumentAnalyzer/migrations/add_raw_llm_response_column.sql
 ```
 
 Or manually execute:
 ```sql
 ALTER TABLE chunk_metadata ADD COLUMN IF NOT EXISTS model_used TEXT;
 COMMENT ON COLUMN chunk_metadata.model_used IS 'The LLM model used to generate this metadata';
+
+ALTER TABLE chunk_metadata ADD COLUMN IF NOT EXISTS raw_llm_response TEXT;
+COMMENT ON COLUMN chunk_metadata.raw_llm_response IS 'The raw LLM response text, stored for debugging parsing failures';
 ```
 
-## Example Query
-To see which models have been used for metadata generation:
+## Example Queries
 
+### Find models used for metadata generation:
 ```sql
 SELECT DISTINCT model_used, COUNT(*) as count
 FROM chunk_metadata
 GROUP BY model_used
 ORDER BY count DESC;
+```
+
+### Find chunks with parsing errors:
+```sql
+SELECT document_id, chunk_index, model_used, long_summary, raw_llm_response
+FROM chunk_metadata
+WHERE long_summary LIKE 'Failed to parse%' OR long_summary LIKE 'Error:%'
+ORDER BY created_at DESC;
+```
+
+### Examine raw responses by model:
+```sql
+SELECT document_id, chunk_index, model_used, substring(raw_llm_response, 1, 200) as response_preview
+FROM chunk_metadata
+WHERE model_used = 'gpt-4.5-preview'
+ORDER BY created_at DESC
+LIMIT 10;
 ``` 
