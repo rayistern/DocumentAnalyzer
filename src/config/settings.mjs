@@ -121,7 +121,7 @@ export const OPENAI_PROMPTS = {
     - key_terms_he (domain specific terms/phrases, in the original Hebrew)
     - key_phrases_he (important Hebrew quotes)
     - key_phrases_en (English translations of key phrases)
-    - bibliography_snippets (array of citations and references {snippet, source}, Hebrew)
+    - bibliography_snippets (array of citations and references. These will usually not be explicitly stated in the text, rather you should identify quoted text and identify the source. {snippet, source}, Hebrew)
     - questions_explicit (directly stated in text, Original Hebrew verbatim)
     - questions_implied (suggested by the content, English)
     - qa_pair (An implied question which the text addresses. This Q&A pair will be used for future training, so please imagine it as a user's question having not seen the text at all. Provide a thorough, structured, formatted, long-form response in a conversational LLM style. The response should be well-organized, beginning with a brief summary, followed by structured key points or explanations, and concluding with a strong takeaway or final insight. Include only information that is stated in the text, and only that information which answers the question.)
