@@ -204,7 +204,10 @@ export async function processFile(content, type, filepath, maxChunkLength = OPEN
                             questions_answered: metadata.questionsAnswered,
                             api_metadata: apiMetadata,
                             status: 'processed', // Add status update to mark as processed
-                            updated_at: new Date().toISOString()
+                            updated_at: new Date().toISOString(),
+                            input_tokens: metadataResponse.usage?.prompt_tokens || null,
+                            output_tokens: metadataResponse.usage?.completion_tokens || null,
+                            total_tokens: metadataResponse.usage?.total_tokens || null
                         })
                         .eq('id', document.id);
                     
@@ -1865,7 +1868,8 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                                             generated_title: "Metadata Structure Error"
                                         }, 
                                         metadataResponse.model,
-                                        rawResponse  // Save the raw response even on error
+                                        rawResponse,  // Save the raw response even on error
+                                        {usage: metadataResponse.usage}  // Add API metadata with token usage
                                     );
                                     continue;
                                 }
@@ -1879,7 +1883,8 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                                     i, 
                                     metadata, 
                                     metadataResponse.model,
-                                    rawResponse  // Save the raw response
+                                    rawResponse,  // Save the raw response
+                                    {usage: metadataResponse.usage}  // Add API metadata with token usage
                                 );
                                 console.log(`✅ Saved metadata for chunk ${i+1} using model: ${metadataResponse.model}`);
                             } else {
@@ -2012,7 +2017,10 @@ export async function batchProcessFullMetadata(documentIds) {
                     keywords: metadata.keywords,
                     questions_answered: metadata.questionsAnswered,
                     api_metadata: apiMetadata,
-                    updated_at: new Date().toISOString()
+                    updated_at: new Date().toISOString(),
+                    input_tokens: metadataResponse.usage?.prompt_tokens || null,
+                    output_tokens: metadataResponse.usage?.completion_tokens || null,
+                    total_tokens: metadataResponse.usage?.total_tokens || null
                 })
                 .eq('id', docId);
                 

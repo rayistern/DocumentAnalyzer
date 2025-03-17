@@ -563,7 +563,7 @@ export async function saveCleanedDocument(documentId, cleanedText, originalText,
     }
 }
 
-export async function saveChunkMetadata(documentId, chunkIndex, metadata, modelUsed = null, rawLLMResponse = null) {
+export async function saveChunkMetadata(documentId, chunkIndex, metadata, modelUsed = null, rawLLMResponse = null, apiMetadata = null) {
     try {
         console.log(`Saving metadata for document ${documentId}, chunk ${chunkIndex}...`);
         
@@ -730,7 +730,10 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata, modelU
             named_entities: Array.isArray(mappedMetadata.named_entities) ? `{${mappedMetadata.named_entities.map(e => typeof e === 'string' ? `"${e.replace(/"/g, '\\"')}"` : `"${String(e)}"`).join(',')}}` : null,
             created_at: new Date().toISOString(),
             model_used: modelUsed,
-            raw_llm_response: rawLLMResponse
+            raw_llm_response: rawLLMResponse,
+            input_tokens: apiMetadata?.usage?.prompt_tokens || null,
+            output_tokens: apiMetadata?.usage?.completion_tokens || null,
+            total_tokens: apiMetadata?.usage?.total_tokens || null
         };
 
         // Log metadata fields before saving
