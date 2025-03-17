@@ -135,3 +135,14 @@ Error processing metadata for chunk 3: TypeError: t.replace is not a function
 41. Still getting fields at end of qa pair
 42. Maybe its taking transliteration a bit too intensly
 43. Pad documents in order to go in order
+44. Model using crazy amounts of tokens sometimes
+45. Can you please set up the same parsing logic for the fullMetadata output which goes into the documents table. That one often fails as well.
+46. Can we pass a token limit with the metadata call. That one often results in massively long trailing whitespace or something, using 5x the amount of tokens as a standard call.
+47. Automatic email-triggered process quitting
+48. Test timeout
+49. Mini model hallucinates
+50. Batch usage
+51. Make sure regex json processing extends to all fields
+52. Add title into database (chunkMetadata?)
+53. Whats the value being saved into remainder_text in prechunks?
+54. Where is the cleaned text saved to?

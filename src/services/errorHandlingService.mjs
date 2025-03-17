@@ -1,5 +1,6 @@
 import { OPENAI_SETTINGS } from '../config/settings.mjs';
 import { setupProcessTimeout } from '../config.mjs';
+import { logLLMResponse } from './llmLoggingService.mjs';
 
 export async function retryWithFallback(operation, modelIndex = 0) {
     const { fallbackModels, retryConfig } = OPENAI_SETTINGS;
@@ -12,7 +13,7 @@ export async function retryWithFallback(operation, modelIndex = 0) {
         } catch (error) {
             lastError = error;
             console.error(`Attempt ${retry + 1} failed with model ${fallbackModels[modelIndex]}:`, error);
-            await logLLMResponse(null, `Error: ${error.message}`, fallbackModels[modelIndex]);
+            await logLLMResponse(null, `Error: ${error.message}`, fallbackModels[modelIndex], null);
 
 
 // Set up the global timeout for all processes

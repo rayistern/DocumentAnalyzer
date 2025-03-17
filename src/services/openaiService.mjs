@@ -174,6 +174,16 @@ export async function processFile(content, type, filepath, maxChunkLength = OPEN
                 
                 console.log(`[${new Date().toISOString()}] ✅ Received OpenAI response for metadata`);
                 
+                // Add detailed token usage logging
+                console.log(`[${new Date().toISOString()}] 📊 TOKEN USAGE:`, {
+                    prompt_tokens: metadataResponse.usage?.prompt_tokens || 'N/A',
+                    completion_tokens: metadataResponse.usage?.completion_tokens || 'N/A',
+                    total_tokens: metadataResponse.usage?.total_tokens || 'N/A',
+                    reasoning_tokens: metadataResponse.usage?.completion_tokens_details?.reasoning_tokens || 'N/A',
+                    cached_tokens: metadataResponse.usage?.prompt_tokens_details?.cached_tokens || 'N/A', 
+                    raw_usage_object: JSON.stringify(metadataResponse.usage)
+                });
+                
                 // Store raw response and metadata
                 const cleanedResponse = removeMarkdownFormatting(metadataResponse.choices[0].message.content);
                 const metadata = parseJsonResponse(cleanedResponse, null, 'fullMetadata');
@@ -207,7 +217,9 @@ export async function processFile(content, type, filepath, maxChunkLength = OPEN
                             updated_at: new Date().toISOString(),
                             input_tokens: metadataResponse.usage?.prompt_tokens || null,
                             output_tokens: metadataResponse.usage?.completion_tokens || null,
-                            total_tokens: metadataResponse.usage?.total_tokens || null
+                            total_tokens: metadataResponse.usage?.total_tokens || null,
+                            reasoning_tokens: metadataResponse.usage?.completion_tokens_details?.reasoning_tokens || null,
+                            cached_tokens: metadataResponse.usage?.prompt_tokens_details?.cached_tokens || null
                         })
                         .eq('id', document.id);
                     
@@ -506,7 +518,7 @@ async function createChunks(text, maxChunkLength, filepath) {
             ])
         );
 
-        await logLLMResponse(null, response.choices[0].message.content, OPENAI_SETTINGS.model);
+        await logLLMResponse(null, response.choices[0].message.content, OPENAI_SETTINGS.model, response.usage);
 
         const cleanResponse = removeMarkdownFormatting(response.choices[0].message.content);
         // text parameter passed here must match exactly what was sent to LLM for indices to align
@@ -547,7 +559,7 @@ async function summarizeContent(text) {
             ])
         );
 
-        await logLLMResponse(null, response.choices[0].message.content, OPENAI_SETTINGS.model);
+        await logLLMResponse(null, response.choices[0].message.content, OPENAI_SETTINGS.model, response.usage);
         const result = parseJsonResponse(response.choices[0].message.content, null, 'summarize');
         
         // Store in Supabase
@@ -571,7 +583,7 @@ async function analyzeSentiment(text) {
             ])
         );
 
-        await logLLMResponse(null, response.choices[0].message.content, OPENAI_SETTINGS.model);
+        await logLLMResponse(null, response.choices[0].message.content, OPENAI_SETTINGS.model, response.usage);
         const result = parseJsonResponse(response.choices[0].message.content, null, 'sentiment');
         
         // Store in Supabase
@@ -1084,7 +1096,19 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         );
 
         console.log('Clean response received');
-        await logLLMResponse(null, cleanResponse.choices[0].message.content, OPENAI_SETTINGS.model);
+        
+        // Log token usage information for cleaning
+        console.log(`[${new Date().toISOString()}] 📊 TOKEN USAGE for document cleaning:`, {
+            prompt_tokens: cleanResponse.usage?.prompt_tokens || 'N/A',
+            completion_tokens: cleanResponse.usage?.completion_tokens || 'N/A',
+            total_tokens: cleanResponse.usage?.total_tokens || 'N/A',
+            reasoning_tokens: cleanResponse.usage?.completion_tokens_details?.reasoning_tokens || 'N/A',
+            cached_tokens: cleanResponse.usage?.prompt_tokens_details?.cached_tokens || 'N/A',
+            raw_usage_object: JSON.stringify(cleanResponse.usage)
+        });
+        
+        await logLLMResponse(null, cleanResponse.choices[0].message.content, OPENAI_SETTINGS.model, cleanResponse.usage);
+        
         let cleanResult;
         try {
             cleanResult = parseJsonResponse(cleanResponse.choices[0].message.content, 'textRemoval');
@@ -1877,6 +1901,16 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                                 // Add model information to the metadata
                                 console.log(`Model used for metadata: ${metadataResponse.model}`);
                                 
+                                // Add detailed token usage logging
+                                console.log(`[${new Date().toISOString()}] 📊 TOKEN USAGE for chunk ${i+1}:`, {
+                                    prompt_tokens: metadataResponse.usage?.prompt_tokens || 'N/A',
+                                    completion_tokens: metadataResponse.usage?.completion_tokens || 'N/A',
+                                    total_tokens: metadataResponse.usage?.total_tokens || 'N/A',
+                                    reasoning_tokens: metadataResponse.usage?.completion_tokens_details?.reasoning_tokens || 'N/A',
+                                    cached_tokens: metadataResponse.usage?.prompt_tokens_details?.cached_tokens || 'N/A',
+                                    raw_usage_object: JSON.stringify(metadataResponse.usage)
+                                });
+                                
                                 // Save the metadata with model information and raw response
                                 await saveChunkMetadata(
                                     document.id, 
@@ -1921,6 +1955,26 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         console.log(`Updated document ${document.id} with ${finalChunkResult.chunks.length} chunks (remainder text kept in memory only)`);
     } catch (error) {
         console.error('Error updating document with chunks:', error);
+    }
+    
+    // Add this after all chunks are processed - around line 1830
+    // Save the final cleaned text to the database if we have it
+    if (finalCleanedText && finalCleanedText.length > 0) {
+        console.log(`\n[${new Date().toISOString()}] 💾 Saving final cleaned document text to the database`);
+        try {
+            await saveCleanedDocument(
+                document.id, 
+                finalCleanedText,
+                content,
+                getModelForOperation('clean'),
+                cleanResponse?.usage  // Pass token usage if available
+            );
+            console.log(`[${new Date().toISOString()}] ✅ Successfully saved cleaned document text`);
+        } catch (saveError) {
+            console.error(`[${new Date().toISOString()}] ❌ Error saving cleaned document:`, saveError);
+        }
+    } else {
+        console.log(`[${new Date().toISOString()}] ⚠️ No cleaned document text to save`);
     }
     
     return {
@@ -1999,6 +2053,16 @@ export async function batchProcessFullMetadata(documentIds) {
             const cleanedResponse = removeMarkdownFormatting(metadataResponse.choices[0].message.content);
             const metadata = parseJsonResponse(cleanedResponse, null, 'fullMetadata');
             
+            // Add detailed token usage logging
+            console.log(`[${new Date().toISOString()}] 📊 TOKEN USAGE for document ${docId}:`, {
+                prompt_tokens: metadataResponse.usage?.prompt_tokens || 'N/A',
+                completion_tokens: metadataResponse.usage?.completion_tokens || 'N/A',
+                total_tokens: metadataResponse.usage?.total_tokens || 'N/A',
+                reasoning_tokens: metadataResponse.usage?.completion_tokens_details?.reasoning_tokens || 'N/A',
+                cached_tokens: metadataResponse.usage?.prompt_tokens_details?.cached_tokens || 'N/A',
+                raw_usage_object: JSON.stringify(metadataResponse.usage)
+            });
+            
             // Create API metadata object
             const apiMetadata = {
                 model: metadataResponse.model,
@@ -2020,7 +2084,9 @@ export async function batchProcessFullMetadata(documentIds) {
                     updated_at: new Date().toISOString(),
                     input_tokens: metadataResponse.usage?.prompt_tokens || null,
                     output_tokens: metadataResponse.usage?.completion_tokens || null,
-                    total_tokens: metadataResponse.usage?.total_tokens || null
+                    total_tokens: metadataResponse.usage?.total_tokens || null,
+                    reasoning_tokens: metadataResponse.usage?.completion_tokens_details?.reasoning_tokens || null,
+                    cached_tokens: metadataResponse.usage?.prompt_tokens_details?.cached_tokens || null
                 })
                 .eq('id', docId);
                 

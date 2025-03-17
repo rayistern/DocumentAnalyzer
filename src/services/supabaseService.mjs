@@ -534,7 +534,7 @@ export async function getAnalysisByType(type) {
     }
 }
 
-export async function saveCleanedDocument(documentId, cleanedText, originalText, model) {
+export async function saveCleanedDocument(documentId, cleanedText, originalText, model, apiTokens = null) {
     try {
         // Get the document source id from the original document
         const { data: document, error: docError } = await supabase
@@ -555,6 +555,45 @@ export async function saveCleanedDocument(documentId, cleanedText, originalText,
             .eq('id', document.document_source_id);
 
         if (updateError) throw updateError;
+
+        // Insert into cleaned_documents table
+        console.log(`[${new Date().toISOString()}] 🔄 Inserting entry into cleaned_documents table for document ${documentId}`);
+        
+        // Create token usage object for logging
+        const tokenUsage = {
+            input_tokens: apiTokens?.prompt_tokens || null,
+            output_tokens: apiTokens?.completion_tokens || null,
+            total_tokens: apiTokens?.total_tokens || null,
+            reasoning_tokens: apiTokens?.completion_tokens_details?.reasoning_tokens || null,
+            cached_tokens: apiTokens?.prompt_tokens_details?.cached_tokens || null
+        };
+        
+        // Log token usage
+        console.log(`[${new Date().toISOString()}] 📊 TOKEN USAGE for document cleaning:`, {
+            ...tokenUsage,
+            raw_usage_object: apiTokens ? JSON.stringify(apiTokens) : 'N/A'
+        });
+        
+        // Insert the data
+        const { error: insertError } = await supabase
+            .from('cleaned_documents')
+            .insert({
+                id: documentId,
+                cleaned_content: cleanedText,
+                original_document: originalText,
+                llm_model: model,
+                input_tokens: tokenUsage.input_tokens,
+                output_tokens: tokenUsage.output_tokens,
+                total_tokens: tokenUsage.total_tokens,
+                reasoning_tokens: tokenUsage.reasoning_tokens,
+                cached_tokens: tokenUsage.cached_tokens
+            });
+            
+        if (insertError) {
+            console.error(`[${new Date().toISOString()}] ❌ ERROR inserting into cleaned_documents:`, insertError);
+        } else {
+            console.log(`[${new Date().toISOString()}] ✅ Successfully saved to cleaned_documents table`);
+        }
 
         return { success: true };
     } catch (error) {
@@ -733,7 +772,9 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata, modelU
             raw_llm_response: rawLLMResponse,
             input_tokens: apiMetadata?.usage?.prompt_tokens || null,
             output_tokens: apiMetadata?.usage?.completion_tokens || null,
-            total_tokens: apiMetadata?.usage?.total_tokens || null
+            total_tokens: apiMetadata?.usage?.total_tokens || null,
+            reasoning_tokens: apiMetadata?.usage?.completion_tokens_details?.reasoning_tokens || null,
+            cached_tokens: apiMetadata?.usage?.prompt_tokens_details?.cached_tokens || null
         };
 
         // Log metadata fields before saving
