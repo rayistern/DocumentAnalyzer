@@ -622,7 +622,7 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata, modelU
             }
         }
         
-        // Convert arrays to Postgres array format
+        // Convert arrays to Postgres format
         const formattedMetadata = {
             document_id: documentId,
             chunk_index: chunkIndex,
@@ -635,14 +635,14 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata, modelU
             key_terms_he: Array.isArray(mappedMetadata.key_terms_he) ? `{${mappedMetadata.key_terms_he.map(t => typeof t === 'string' ? `"${t.replace(/"/g, '\\"')}"` : `"${String(t)}"`).join(',')}}` : null,
             key_phrases_he: Array.isArray(mappedMetadata.key_phrases_he) ? `{${mappedMetadata.key_phrases_he.map(p => typeof p === 'string' ? `"${p.replace(/"/g, '\\"')}"` : `"${String(p)}"`).join(',')}}` : null,
             key_phrases_en: Array.isArray(mappedMetadata.key_phrases_en) ? `{${mappedMetadata.key_phrases_en.map(p => typeof p === 'string' ? `"${p.replace(/"/g, '\\"')}"` : `"${String(p)}"`).join(',')}}` : null,
-            bibliography_snippets: Array.isArray(mappedMetadata.bibliography_snippets) ? `{${mappedMetadata.bibliography_snippets.map(item => JSON.stringify(item)).join(',')}}` : null,
+            bibliography_snippets: Array.isArray(mappedMetadata.bibliography_snippets) ? mappedMetadata.bibliography_snippets : null,
             // Skip problematic fields
             questions_explicit: Array.isArray(mappedMetadata.questions_explicit) ? `{${mappedMetadata.questions_explicit.map(q => typeof q === 'string' ? `"${q.replace(/"/g, '\\"')}"` : `"${String(q)}"`).join(',')}}` : null,
             questions_implied: Array.isArray(mappedMetadata.questions_implied) ? `{${mappedMetadata.questions_implied.map(q => typeof q === 'string' ? `"${q.replace(/"/g, '\\"')}"` : `"${String(q)}"`).join(',')}}` : null,
             reconciled_issues: Array.isArray(mappedMetadata.reconciled_issues) ? `{${mappedMetadata.reconciled_issues.map(i => typeof i === 'string' ? `"${i.replace(/"/g, '\\"')}"` : `"${String(i)}"`).join(',')}}` : null,
             qa_pair: qa_pair_value,
             potential_typos: Array.isArray(mappedMetadata.potential_typos) ? `{${mappedMetadata.potential_typos.map(t => typeof t === 'string' ? `"${t.replace(/"/g, '\\"')}"` : `"${String(t)}"`).join(',')}}` : null,
-            identified_abbreviations: Array.isArray(mappedMetadata.identified_abbreviations) ? `{${mappedMetadata.identified_abbreviations.map(item => JSON.stringify(item)).join(',')}}` : null,
+            identified_abbreviations: Array.isArray(mappedMetadata.identified_abbreviations) ? mappedMetadata.identified_abbreviations : null,
             named_entities: Array.isArray(mappedMetadata.named_entities) ? `{${mappedMetadata.named_entities.map(e => typeof e === 'string' ? `"${e.replace(/"/g, '\\"')}"` : `"${String(e)}"`).join(',')}}` : null,
             created_at: new Date().toISOString(),
             model_used: modelUsed,
@@ -652,6 +652,23 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata, modelU
         // Log metadata fields before saving
         console.log(`Preparing to save metadata for chunk ${chunkIndex} with fields:`, 
             Object.keys(formattedMetadata).filter(k => formattedMetadata[k] !== null).join(', '));
+
+        // Add extra debugging for JSONB[] fields
+        if (formattedMetadata.bibliography_snippets) {
+            console.log(`bibliography_snippets format check:`, {
+                isArray: Array.isArray(formattedMetadata.bibliography_snippets),
+                value: JSON.stringify(formattedMetadata.bibliography_snippets).substring(0, 100) + '...',
+                sample: formattedMetadata.bibliography_snippets[0]
+            });
+        }
+        
+        if (formattedMetadata.identified_abbreviations) {
+            console.log(`identified_abbreviations format check:`, {
+                isArray: Array.isArray(formattedMetadata.identified_abbreviations),
+                value: JSON.stringify(formattedMetadata.identified_abbreviations).substring(0, 100) + '...',
+                sample: formattedMetadata.identified_abbreviations[0]
+            });
+        }
 
         const { error } = await supabase
             .from('chunk_metadata')
