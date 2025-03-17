@@ -386,6 +386,144 @@ export function repairJson(jsonText) {
 }
 
 /**
+ * Fixes common structure issues with metadata responses
+ * Particularly the issue where fields get incorrectly nested inside qa_pair
+ * 
+ * @param {Object} parsedObject - The parsed JSON object to fix
+ * @returns {Object} - The fixed object with corrected structure
+ */
+export function fixMetadataStructure(parsedObject) {
+    // If there's no qa_pair or it's not an object, nothing to fix
+    if (!parsedObject?.qa_pair || typeof parsedObject.qa_pair !== 'object') {
+        return parsedObject;
+    }
+
+    // Fields that should be at the root level, not inside qa_pair
+    const rootLevelFields = [
+        'potential_typos',
+        'identified_abbreviations', 
+        'named_entities'
+    ];
+    
+    // Check if any of these fields are incorrectly nested inside qa_pair
+    const fixedObject = {...parsedObject};
+    let modified = false;
+    
+    rootLevelFields.forEach(field => {
+        if (fixedObject.qa_pair[field] !== undefined) {
+            console.log(`[METADATA-REPAIR] Moving ${field} from qa_pair to root level`);
+            // Move the field to the root level if it doesn't already exist
+            if (fixedObject[field] === undefined) {
+                fixedObject[field] = fixedObject.qa_pair[field];
+                modified = true;
+            }
+            // Remove it from qa_pair
+            delete fixedObject.qa_pair[field];
+        }
+    });
+    
+    if (modified) {
+        console.log('[METADATA-REPAIR] Fixed qa_pair structure');
+    }
+    
+    return fixedObject;
+}
+
+/**
+ * Preprocesses raw JSON text to fix common structure issues
+ * before any parsing attempts
+ * 
+ * @param {string} jsonText - The raw JSON text to preprocess
+ * @param {string} schemaType - The type of schema ('metadata', 'chunk', etc.)
+ * @returns {string} - The preprocessed JSON string
+ */
+export function preprocessJsonText(jsonText, schemaType) {
+    if (!jsonText || typeof jsonText !== 'string') {
+        return jsonText;
+    }
+
+    let processed = jsonText;
+    
+    if (schemaType === 'metadata') {
+        // Fix issue where fields are incorrectly nested within qa_pair
+        
+        // First try to detect the pattern of qa_pair with extra fields
+        const qaFieldsPattern = /"qa_pair"\s*:\s*{[\s\S]*?("potential_typos"|"identified_abbreviations"|"named_entities")/;
+        
+        if (qaFieldsPattern.test(processed)) {
+            console.log("[JSON-PREPROCESS] Detected incorrectly nested fields in qa_pair");
+            
+            try {
+                // Try to parse the string to a temporary object to extract fields safely
+                const tempObj = JSON.parse(processed);
+                
+                // If we have a qa_pair object with extra fields
+                if (tempObj.qa_pair && typeof tempObj.qa_pair === 'object') {
+                    const { question, answer, ...extraFields } = tempObj.qa_pair;
+                    
+                    // If there are extra fields that should be at root level
+                    if (extraFields.potential_typos || extraFields.identified_abbreviations || extraFields.named_entities) {
+                        console.log("[JSON-PREPROCESS] Extracting fields from qa_pair via object manipulation");
+                        
+                        // Create a new object with fixed structure
+                        const fixedObj = {
+                            ...tempObj,
+                            qa_pair: { question, answer }
+                        };
+                        
+                        // Move the extra fields to the root
+                        if (extraFields.potential_typos) {
+                            fixedObj.potential_typos = extraFields.potential_typos;
+                        }
+                        if (extraFields.identified_abbreviations) {
+                            fixedObj.identified_abbreviations = extraFields.identified_abbreviations;
+                        }
+                        if (extraFields.named_entities) {
+                            fixedObj.named_entities = extraFields.named_entities;
+                        }
+                        
+                        // Convert back to JSON string
+                        processed = JSON.stringify(fixedObj);
+                        console.log("[JSON-PREPROCESS] Successfully restructured qa_pair via object manipulation");
+                        return processed; // Return early since we've fixed the issue
+                    }
+                }
+            } catch (parseError) {
+                console.log("[JSON-PREPROCESS] Could not parse for direct object manipulation:", parseError.message);
+                // Continue with regex-based approach as fallback
+            }
+            
+            // Fallback to regex-based approach
+            try {
+                // Find qa_pair block and extract only question and answer
+                // This more complex regex safely captures the question and answer values
+                const extractQaPairRegex = /"qa_pair"\s*:\s*{[^}]*?"question"\s*:\s*"((?:\\"|[^"])*)"[^}]*?"answer"\s*:\s*"((?:\\"|[^"])*)"/;
+                const qaMatch = extractQaPairRegex.exec(processed);
+                
+                if (qaMatch) {
+                    const question = qaMatch[1];
+                    const answer = qaMatch[2];
+                    
+                    // Create a clean qa_pair section
+                    const cleanQaPair = `"qa_pair": {"question": "${question}", "answer": "${answer}"}`;
+                    
+                    // Replace the original qa_pair section with our clean version
+                    processed = processed.replace(
+                        /"qa_pair"\s*:\s*{[^{]*?("question"[^}]*?"answer"[^}]*?)("potential_typos"|"identified_abbreviations"|"named_entities")/,
+                        `${cleanQaPair},\n$2`
+                    );
+                    console.log("[JSON-PREPROCESS] Applied regex-based qa_pair structure fix");
+                }
+            } catch (regexError) {
+                console.log("[JSON-PREPROCESS] Regex extraction failed:", regexError.message);
+            }
+        }
+    }
+    
+    return processed;
+}
+
+/**
  * Parses LLM JSON responses with multiple fallback strategies
  * 
  * IMPORTANT: Parameter order matters! Common source of bugs:
@@ -415,14 +553,20 @@ export function repairJson(jsonText) {
  * @returns {Object} Parsed response object according to the specified schema type
  */
 export function parseJsonResponse(jsonResponseText, cleanedText = null, schemaType = 'chunk') {
+    // Preprocess the JSON text to fix common structure issues
+    const preprocessedJson = preprocessJsonText(jsonResponseText, schemaType);
+    
     let parsedResponse;
     
     // First attempt: Try standard JSON.parse with Zod validation
     try {
-        const parsed = JSON.parse(jsonResponseText);
+        const parsed = JSON.parse(preprocessedJson);
+        
+        // Fix metadata structure if applicable
+        const fixedParsed = schemaType === 'metadata' ? fixMetadataStructure(parsed) : parsed;
         
         // Validate with Zod
-        const validated = validateWithZod(parsed, schemaType);
+        const validated = validateWithZod(fixedParsed, schemaType);
         if (validated) {
             console.log("[HEBREW-HANDLING] Successfully parsed and validated response with Zod");
             return validated;
@@ -430,20 +574,23 @@ export function parseJsonResponse(jsonResponseText, cleanedText = null, schemaTy
         
         // If Zod validation fails but JSON parsing worked, still return the parsed JSON
         console.log("[HEBREW-HANDLING] JSON parsing succeeded but Zod validation failed. Using parsed data anyway.");
-        return parsed;
+        return fixedParsed;
     } catch (error) {
         console.log("[HEBREW-HANDLING] Standard JSON parsing failed:", error.message);
     }
     
     // Second attempt: Extract JSON part and try to parse with Zod
     try {
-        const extractedJson = cleanJsonResponse(jsonResponseText);
+        const extractedJson = cleanJsonResponse(preprocessedJson);
         if (extractedJson) {
             try {
                 const parsed = JSON.parse(extractedJson);
                 
+                // Fix metadata structure if applicable
+                const fixedParsed = schemaType === 'metadata' ? fixMetadataStructure(parsed) : parsed;
+                
                 // Validate with Zod
-                const validated = validateWithZod(parsed, schemaType);
+                const validated = validateWithZod(fixedParsed, schemaType);
                 if (validated) {
                     console.log("[HEBREW-HANDLING] Successfully parsed and validated extracted JSON with Zod");
                     return validated;
@@ -451,7 +598,7 @@ export function parseJsonResponse(jsonResponseText, cleanedText = null, schemaTy
                 
                 // If Zod validation fails but JSON parsing worked, return the parsed JSON
                 console.log("[HEBREW-HANDLING] Extracted JSON parsing succeeded but Zod validation failed. Using parsed data anyway.");
-                return parsed;
+                return fixedParsed;
             } catch (parseError) {
                 // Try repairing the JSON
                 console.log("[HEBREW-HANDLING] Attempting to repair extracted JSON");
@@ -461,8 +608,11 @@ export function parseJsonResponse(jsonResponseText, cleanedText = null, schemaTy
                     const parsed = JSON.parse(repairedJson);
                     console.log("[HEBREW-HANDLING] Successfully parsed repaired JSON");
                     
+                    // Fix metadata structure if applicable
+                    const fixedParsed = schemaType === 'metadata' ? fixMetadataStructure(parsed) : parsed;
+                    
                     // Validate with Zod
-                    const validated = validateWithZod(parsed, schemaType);
+                    const validated = validateWithZod(fixedParsed, schemaType);
                     if (validated) {
                         console.log("[HEBREW-HANDLING] Successfully validated repaired JSON with Zod");
                         return validated;
@@ -470,7 +620,7 @@ export function parseJsonResponse(jsonResponseText, cleanedText = null, schemaTy
                     
                     // If Zod validation fails but JSON parsing worked, return the parsed JSON
                     console.log("[HEBREW-HANDLING] Repaired JSON parsing succeeded but Zod validation failed. Using parsed data anyway.");
-                    return parsed;
+                    return fixedParsed;
                 } catch (repairError) {
                     console.log("[HEBREW-HANDLING] Repair attempt failed:", repairError.message);
                 }
@@ -483,7 +633,7 @@ export function parseJsonResponse(jsonResponseText, cleanedText = null, schemaTy
     // Third attempt: Fallback to string-based extraction
     console.log("[HEBREW-HANDLING] Attempting string-based chunk extraction");
     if (schemaType === 'chunk') {
-        const extractedChunks = extractChunksFromString(jsonResponseText);
+        const extractedChunks = extractChunksFromString(preprocessedJson);
         
         if (extractedChunks.chunks && extractedChunks.chunks.length > 0) {
             console.log(`[HEBREW-HANDLING] Successfully extracted ${extractedChunks.chunks.length} chunks using string-based approach`);
@@ -504,8 +654,8 @@ export function parseJsonResponse(jsonResponseText, cleanedText = null, schemaTy
         console.log(`[HEBREW-HANDLING] Skipping string-based extraction for ${schemaType} and using parsed data as-is`);
         try {
             // Attempt one more clean parse
-            const cleanedJson = cleanJsonResponse(jsonResponseText);
-            const parsedMetadata = JSON.parse(cleanedJson || jsonResponseText);
+            const cleanedJson = cleanJsonResponse(preprocessedJson);
+            const parsedMetadata = JSON.parse(cleanedJson || preprocessedJson);
             
             // Verify this is actually a metadata object and not a chunks object
             if (parsedMetadata.chunks) {
@@ -516,6 +666,13 @@ export function parseJsonResponse(jsonResponseText, cleanedText = null, schemaTy
                     short_summary: "Incorrect response structure",
                     generated_title: "Metadata Structure Error"
                 };
+            }
+            
+            // Fix metadata structure if applicable
+            if (schemaType === 'metadata') {
+                const fixedMetadata = fixMetadataStructure(parsedMetadata);
+                console.log(`[HEBREW-HANDLING] Applied structure fixes to ${schemaType} response`);
+                return fixedMetadata;
             }
             
             return parsedMetadata;

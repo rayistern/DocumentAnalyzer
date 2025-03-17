@@ -580,6 +580,31 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata, modelU
             console.log(`Raw LLM response saved for chunk ${chunkIndex}: ${rawLLMResponse.length} characters`);
         }
         
+        // Fix any structure issues with qa_pair (fields incorrectly nested inside qa_pair)
+        if (metadata.qa_pair && typeof metadata.qa_pair === 'object') {
+            const { question, answer, potential_typos, identified_abbreviations, named_entities, ...otherProps } = metadata.qa_pair;
+            
+            // Check if any fields that should be at root level are in qa_pair
+            if (potential_typos || identified_abbreviations || named_entities) {
+                console.log(`[METADATA-REPAIR] Found fields incorrectly nested in qa_pair for chunk ${chunkIndex}`);
+                
+                // Move fields to root level
+                if (potential_typos && !metadata.potential_typos) {
+                    metadata.potential_typos = potential_typos;
+                }
+                if (identified_abbreviations && !metadata.identified_abbreviations) {
+                    metadata.identified_abbreviations = identified_abbreviations;
+                }
+                if (named_entities && !metadata.named_entities) {
+                    metadata.named_entities = named_entities;
+                }
+                
+                // Clean qa_pair to only include question and answer
+                metadata.qa_pair = { question, answer };
+                console.log(`[METADATA-REPAIR] Fixed qa_pair structure for chunk ${chunkIndex}`);
+            }
+        }
+        
         // Map LLM response fields to database fields if needed
         const mappedMetadata = {
             long_summary: metadata.long_summary || metadata.longSummary,
