@@ -590,12 +590,14 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata, modelU
             key_terms_he: metadata.key_terms_he || metadata.keyTermsHe,
             key_phrases_he: metadata.key_phrases_he || metadata.keyPhrasesHe,
             key_phrases_en: metadata.key_phrases_en || metadata.keyPhrasesEn,
+            bibliography_snippets: metadata.bibliography_snippets || metadata.bibliographySnippets,
             // Skip problematic fields
             questions_explicit: metadata.questions_explicit || metadata.questionsExplicit,
             questions_implied: metadata.questions_implied || metadata.questionsImplied,
             reconciled_issues: metadata.reconciled_issues || metadata.reconciledIssues,
             qa_pair: metadata.qa_pair || metadata.qaPair,
             potential_typos: metadata.potential_typos || metadata.potentialTypos,
+            identified_abbreviations: metadata.identified_abbreviations || metadata.identifiedAbbreviations,
             named_entities: metadata.named_entities || metadata.namedEntities
         };
         
@@ -633,16 +635,18 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata, modelU
             key_terms_he: Array.isArray(mappedMetadata.key_terms_he) ? `{${mappedMetadata.key_terms_he.map(t => typeof t === 'string' ? `"${t.replace(/"/g, '\\"')}"` : `"${String(t)}"`).join(',')}}` : null,
             key_phrases_he: Array.isArray(mappedMetadata.key_phrases_he) ? `{${mappedMetadata.key_phrases_he.map(p => typeof p === 'string' ? `"${p.replace(/"/g, '\\"')}"` : `"${String(p)}"`).join(',')}}` : null,
             key_phrases_en: Array.isArray(mappedMetadata.key_phrases_en) ? `{${mappedMetadata.key_phrases_en.map(p => typeof p === 'string' ? `"${p.replace(/"/g, '\\"')}"` : `"${String(p)}"`).join(',')}}` : null,
+            bibliography_snippets: Array.isArray(mappedMetadata.bibliography_snippets) ? `{${mappedMetadata.bibliography_snippets.map(item => JSON.stringify(item)).join(',')}}` : null,
             // Skip problematic fields
             questions_explicit: Array.isArray(mappedMetadata.questions_explicit) ? `{${mappedMetadata.questions_explicit.map(q => typeof q === 'string' ? `"${q.replace(/"/g, '\\"')}"` : `"${String(q)}"`).join(',')}}` : null,
             questions_implied: Array.isArray(mappedMetadata.questions_implied) ? `{${mappedMetadata.questions_implied.map(q => typeof q === 'string' ? `"${q.replace(/"/g, '\\"')}"` : `"${String(q)}"`).join(',')}}` : null,
             reconciled_issues: Array.isArray(mappedMetadata.reconciled_issues) ? `{${mappedMetadata.reconciled_issues.map(i => typeof i === 'string' ? `"${i.replace(/"/g, '\\"')}"` : `"${String(i)}"`).join(',')}}` : null,
-            qa_pair: qa_pair_value, // Use our specially formatted qa_pair value
+            qa_pair: qa_pair_value,
             potential_typos: Array.isArray(mappedMetadata.potential_typos) ? `{${mappedMetadata.potential_typos.map(t => typeof t === 'string' ? `"${t.replace(/"/g, '\\"')}"` : `"${String(t)}"`).join(',')}}` : null,
+            identified_abbreviations: Array.isArray(mappedMetadata.identified_abbreviations) ? `{${mappedMetadata.identified_abbreviations.map(item => JSON.stringify(item)).join(',')}}` : null,
             named_entities: Array.isArray(mappedMetadata.named_entities) ? `{${mappedMetadata.named_entities.map(e => typeof e === 'string' ? `"${e.replace(/"/g, '\\"')}"` : `"${String(e)}"`).join(',')}}` : null,
             created_at: new Date().toISOString(),
-            model_used: modelUsed, // Add the model used
-            raw_llm_response: rawLLMResponse // Store the raw LLM response
+            model_used: modelUsed,
+            raw_llm_response: rawLLMResponse
         };
 
         // Log metadata fields before saving
