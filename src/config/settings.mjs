@@ -20,7 +20,7 @@ export const OPENAI_SETTINGS = {
         operations: {
             clean: "gpt-4o-mini",
             chunk: "o3-mini",
-            metadata: "o3-mini",
+            metadata: "gpt-4.5-preview",
             summarize: "gpt-4o-mini",
             sentiment: "gpt-4o-mini",
             fullMetadata: "gpt-4.5-preview"
@@ -112,7 +112,7 @@ export const OPENAI_PROMPTS = {
     metadata: ( isIncomplete = false) => ({
         role: "user",
         content: `Analyze the given text chunk and provide detailed metadata in JSON format. Each piece of metadata needs to be self contained, not using ambiguous references like 'the text'. ${isIncomplete ? ' Take into account the relative position of the text chunk in the flow of the document.' : ''} Include:
-    - long_summary (1-2 paragraphs, in English. The audience is familiar with the domain, leverage transliterated Hebrew terminology for domain specific terms.)
+    - long_summary (1-2 paragraphs, in English. The audience is familiar with the domain, leverage transliterated Hebrew terminology for domain specific terms, using a modern Chabad transliteration style.)
     - short_summary (1-2 sentences, in English)
     - quiz_questions (3-5 questions in English. Make sure these can be used standalone and do not ambiguously reference the text.)
     - followup_thinking_questions (2-3 deeper analytical questions, in English)
@@ -124,7 +124,7 @@ export const OPENAI_PROMPTS = {
     - bibliography_snippets (array of citations and references. These will usually not be explicitly stated in the text, rather you should identify quoted text and identify the source. {snippet, source}, Hebrew)
     - questions_explicit (directly stated in text, Original Hebrew verbatim)
     - questions_implied (suggested by the content, English)
-    - qa_pair (An implied question which the text addresses. This Q&A pair will be used for future training, so please imagine it as a user's question having not seen the text at all. Provide a thorough, structured, formatted, long-form response in a conversational LLM style. The response should be well-organized, beginning with a brief summary, followed by structured key points or explanations, and concluding with a strong takeaway or final insight. Include only information that is stated in the text, and only that information which answers the question.)
+    - qa_pair (One Q&A pair: An implied question which the text addresses. This Q&A pair will be used for future training, so please imagine it as a user's question having not seen the text at all, and not specifically referencing this domain per se. Provide a thorough, structured, formatted, long-form response in a conversational LLM style. The response should be well-organized, beginning with a brief summary, followed by structured key points or explanations, and concluding with a strong takeaway or final insight. Include only information that is stated in the text, and only that information which answers the question.)
     - potential_typos (array of possible errors, Original Hebrew)
     - identified_abbreviations (array of abbreviations with expansions, Original Hebrew)
     - named_entities (array of people, places, texts mentioned, Original Hebrew)
