@@ -518,7 +518,7 @@ async function createChunks(text, maxChunkLength, filepath) {
             ])
         );
 
-        await logLLMResponse(null, response.choices[0].message.content, OPENAI_SETTINGS.model, response.usage);
+        await logLLMResponse(null, response.choices[0].message.content, OPENAI_SETTINGS.model);
 
         const cleanResponse = removeMarkdownFormatting(response.choices[0].message.content);
         // text parameter passed here must match exactly what was sent to LLM for indices to align
@@ -559,7 +559,7 @@ async function summarizeContent(text) {
             ])
         );
 
-        await logLLMResponse(null, response.choices[0].message.content, OPENAI_SETTINGS.model, response.usage);
+        await logLLMResponse(null, response.choices[0].message.content, OPENAI_SETTINGS.model);
         const result = parseJsonResponse(response.choices[0].message.content, null, 'summarize');
         
         // Store in Supabase
@@ -583,7 +583,7 @@ async function analyzeSentiment(text) {
             ])
         );
 
-        await logLLMResponse(null, response.choices[0].message.content, OPENAI_SETTINGS.model, response.usage);
+        await logLLMResponse(null, response.choices[0].message.content, OPENAI_SETTINGS.model);
         const result = parseJsonResponse(response.choices[0].message.content, null, 'sentiment');
         
         // Store in Supabase
@@ -1107,7 +1107,7 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
             raw_usage_object: JSON.stringify(cleanResponse.usage)
         });
         
-        await logLLMResponse(null, cleanResponse.choices[0].message.content, OPENAI_SETTINGS.model, cleanResponse.usage);
+        await logLLMResponse(null, cleanResponse.choices[0].message.content, OPENAI_SETTINGS.model);
         
         let cleanResult;
         try {

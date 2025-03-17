@@ -14,7 +14,7 @@ const supabase = createClient(
   process.env.SUPABASE_ANON_KEY
 )
 
-export async function logLLMResponse(prompt, response, model, usage = null) {
+export async function logLLMResponse(prompt, response, model) {
   try {
     const { error } = await supabase
       .from('llm_logs')
@@ -22,12 +22,7 @@ export async function logLLMResponse(prompt, response, model, usage = null) {
         prompt,
         response,
         model,
-        created_at: new Date().toISOString(),
-        input_tokens: usage?.prompt_tokens || null,
-        output_tokens: usage?.completion_tokens || null,
-        total_tokens: usage?.total_tokens || null,
-        reasoning_tokens: usage?.completion_tokens_details?.reasoning_tokens || null,
-        cached_tokens: usage?.prompt_tokens_details?.cached_tokens || null
+        created_at: new Date().toISOString()
       })
 
     if (error) {
