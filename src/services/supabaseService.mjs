@@ -633,18 +633,72 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata, modelU
         let qa_pair_value = null;
         if (mappedMetadata.qa_pair) {
             try {
-                // If it's already a string, parse it to validate and then re-stringify
-                if (typeof mappedMetadata.qa_pair === 'string') {
-                    const parsed = JSON.parse(mappedMetadata.qa_pair);
+                // First clean any control characters in the qa_pair
+                let cleanedQaPair = mappedMetadata.qa_pair;
+                
+                // If it's a string, clean it directly
+                if (typeof cleanedQaPair === 'string') {
+                    cleanedQaPair = cleanedQaPair
+                        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ' ') // Control chars
+                        .replace(/\\u00([01][0-9A-Fa-f])/g, ' '); // Escaped control chars
+                } 
+                // If it's an object, clean the question and answer fields
+                else if (typeof cleanedQaPair === 'object') {
+                    if (cleanedQaPair.question) {
+                        cleanedQaPair.question = cleanedQaPair.question
+                            .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ' ')
+                            .replace(/\\u00([01][0-9A-Fa-f])/g, ' ');
+                    }
+                    if (cleanedQaPair.answer) {
+                        cleanedQaPair.answer = cleanedQaPair.answer
+                            .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ' ')
+                            .replace(/\\u00([01][0-9A-Fa-f])/g, ' ');
+                    }
+                }
+                
+                // Now process it normally
+                if (typeof cleanedQaPair === 'string') {
+                    // If it's already a string, parse it to validate and then re-stringify
+                    const parsed = JSON.parse(cleanedQaPair);
                     qa_pair_value = JSON.stringify(parsed);
                 } else {
                     // If it's an object, stringify it directly
-                    qa_pair_value = JSON.stringify(mappedMetadata.qa_pair);
+                    qa_pair_value = JSON.stringify(cleanedQaPair);
                 }
                 console.log(`Formatted qa_pair for chunk ${chunkIndex}: ${qa_pair_value.substring(0, 100)}...`);
             } catch (jsonError) {
                 console.error(`Error formatting qa_pair for chunk ${chunkIndex}:`, jsonError);
-                qa_pair_value = null;
+                
+                // Fallback: try a more aggressive cleaning approach
+                try {
+                    console.log(`Attempting aggressive qa_pair recovery for chunk ${chunkIndex}`);
+                    // If we have an object with question and answer, create a clean version
+                    if (typeof mappedMetadata.qa_pair === 'object' && 
+                        mappedMetadata.qa_pair.question && 
+                        mappedMetadata.qa_pair.answer) {
+                        
+                        const cleanQuestion = mappedMetadata.qa_pair.question
+                            .replace(/[\x00-\x1F]/g, ' ') // Strip ALL control chars
+                            .replace(/\\u[0-9a-fA-F]{4}/g, ' '); // Strip all unicode escapes
+                            
+                        const cleanAnswer = mappedMetadata.qa_pair.answer
+                            .replace(/[\x00-\x1F]/g, ' ') // Strip ALL control chars
+                            .replace(/\\u[0-9a-fA-F]{4}/g, ' '); // Strip all unicode escapes
+                        
+                        // Create a clean object and stringify it
+                        qa_pair_value = JSON.stringify({
+                            question: cleanQuestion,
+                            answer: cleanAnswer
+                        });
+                        
+                        console.log(`Recovered qa_pair through aggressive cleaning for chunk ${chunkIndex}`);
+                    } else {
+                        qa_pair_value = null;
+                    }
+                } catch (fallbackError) {
+                    console.error(`Final qa_pair recovery failed for chunk ${chunkIndex}:`, fallbackError);
+                    qa_pair_value = null;
+                }
             }
         }
         
