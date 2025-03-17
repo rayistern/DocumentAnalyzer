@@ -267,25 +267,35 @@ export function validateWithZod(data, schemaType = 'chunk') {
 }
 
 /**
- * Parses JSON response from LLM with enhanced handling for Hebrew text.
+ * Parses LLM JSON responses with multiple fallback strategies
  * 
- * This function implements a multi-layered fallback approach to handle
- * Hebrew text with embedded quotes that can break standard JSON parsing:
+ * IMPORTANT: Parameter order matters! Common source of bugs:
+ * 1. jsonResponseText - The raw LLM response to parse (required)
+ * 2. cleanedText - The text sent to the LLM (for fallbacks, can be null)
+ * 3. schemaType - The expected schema type ('chunk', 'metadata', etc.)
  * 
- * 1. Attempts standard JSON.parse with Zod validation
- * 2. If that fails, tries to extract just the JSON part from the response
- * 3. If that fails:
- *    - For 'chunk' type: Falls back to regex-based string extraction
- *    - For 'metadata'/'fullMetadata' types: Attempts final clean parsing
- * 4. If all parsing attempts fail, creates a single chunk for the entire text
- *    (only relevant for 'chunk' schema type)
+ * Common issues:
+ * - Missing cleanedText parameter causes schemaType to be treated as cleanedText
+ * - This results in incorrect fallback behavior (chunk instead of metadata)
+ * - Always pass null as second param when text extraction isn't needed
+ * 
+ * Workflow for each schema type:
+ * - chunk: Requires cleanedText for fallback text extraction
+ * - metadata/fullMetadata: Does not use cleanedText (pass null)
+ * - summarize/sentiment: Does not use cleanedText (pass null)
+ * 
+ * Multiple parsing strategies:
+ * 1. Standard JSON.parse with Zod validation
+ * 2. Extract JSON from markdown and parse with Zod
+ * 3. Schema-specific string-based extraction for chunks
+ * 4. Schema-specific fallbacks (chunk vs. metadata)
  * 
  * @param {string} jsonResponseText - The response text from the LLM
- * @param {string} cleanedText - The cleaned input text sent to the LLM
- * @param {string} schemaType - The type of schema to use ('chunk', 'metadata', 'fullMetadata', 'textRemoval', etc.)
+ * @param {string|null} cleanedText - The cleaned input text sent to the LLM (null if not needed)
+ * @param {string} schemaType - The type of schema to use ('chunk', 'metadata', 'fullMetadata', etc.)
  * @returns {Object} Parsed response object according to the specified schema type
  */
-export function parseJsonResponse(jsonResponseText, cleanedText, schemaType = 'chunk') {
+export function parseJsonResponse(jsonResponseText, cleanedText = null, schemaType = 'chunk') {
     let parsedResponse;
     
     // First attempt: Try standard JSON.parse with Zod validation

@@ -83,6 +83,51 @@ function getModelForOperation(operation) {
     return OPENAI_SETTINGS.modelConfig.operations[operation] || OPENAI_SETTINGS.model;
 }
 
+/**
+ * Processes a file based on the specified type, handling different workflows
+ * 
+ * IMPORTANT PARAMETER AND TEXT FLOW NOTES:
+ * 
+ * This service has multiple document processing flows with different orders of operations:
+ * 
+ * 1. cleanAndChunkDocument (preferred method):
+ *    a. Pre-chunks text into manageable pieces
+ *    b. Cleans each pre-chunk (removes headers, footers)
+ *    c. Prepends remainder text from previous iteration
+ *    d. Creates finalCleanedText = remainderText + cleanedText
+ *    e. Sends finalCleanedText to LLM for semantic chunking
+ *    f. Extracts chunks using indices relative to finalCleanedText
+ *    g. Processes remainder for next iteration
+ * 
+ * 2. createChunks (alternative method, may have issues):
+ *    a. Sends raw uncleaned text to LLM
+ *    b. LLM returns chunk indices relative to raw text
+ *    c. Cleans each chunk individually after extraction
+ *    d. May result in suboptimal chunks since cleaning happens after boundary detection
+ * 
+ * PARAMETER NAMING CONSISTENCY:
+ * - content: Raw document content from source
+ * - chunk.text: Raw text of a pre-chunk
+ * - cleanedText: Text after removing headers/footers
+ * - finalCleanedText: remainderText + cleanedText (what's sent to LLM)
+ * - remainderText: Text saved from previous iteration
+ * 
+ * JSON PARSING PARAMETERS:
+ * - Always use parseJsonResponse(response, null, 'schemaType') when no text extraction needed
+ * - For chunk extraction, pass the exact text sent to LLM: parseJsonResponse(response, finalCleanedText, 'chunk')
+ * 
+ * @param {string} content - Raw document content
+ * @param {string} type - Processing type ('cleanAndChunk', 'chunk', 'sentiment', etc.)
+ * @param {string} filepath - Path to original file
+ * @param {number} maxChunkLength - Maximum length for each chunk
+ * @param {string} overview - Optional overview text to include
+ * @param {boolean} skipMetadata - Whether to skip metadata generation
+ * @param {boolean} isContinuation - Whether document continues from a previous one
+ * @param {string|null} groupNumber - Optional group number
+ * @param {string|null} previousDocumentId - ID of previous document (deprecated)
+ * @param {string|null} inMemoryRemainderText - Remainder text from previous document
+ * @returns {Object} Processing results based on type
+ */
 export async function processFile(content, type, filepath, maxChunkLength = OPENAI_SETTINGS.defaultMaxChunkLength, overview = '', skipMetadata = false, isContinuation = false, groupNumber = null, previousDocumentId = null, inMemoryRemainderText = null) {
     try {
         // Add a check for the group number to prevent processing files with unexpected group numbers
@@ -405,6 +450,22 @@ function removeMarkdownFormatting(text) {
 }
 
 async function createChunks(text, maxChunkLength, filepath) {
+    /**
+     * NOTE: This function has a potentially problematic workflow compared to cleanAndChunkDocument:
+     * 
+     * 1. It sends raw, uncleaned text directly to the LLM for chunking
+     * 2. The LLM returns indices based on this uncleaned text
+     * 3. Only afterward does it try to clean each chunk individually
+     * 
+     * This is different from the preferred workflow in cleanAndChunkDocument which:
+     * 1. Pre-chunks the text into manageable pieces
+     * 2. Cleans each pre-chunk first (removes headers, footers)
+     * 3. Prepends remainder text from previous iterations
+     * 4. Then sends the clean text to the LLM for semantic chunking
+     * 
+     * If this function is used, chunk boundaries may not align with semantic 
+     * boundaries after cleaning because they were determined on uncleaned text.
+     */
     try {
         const response = await openai.chat.completions.create(
             createApiOptions(getModelForOperation('chunk'), [
@@ -414,7 +475,7 @@ async function createChunks(text, maxChunkLength, filepath) {
                 },
                 {
                     role: "user",
-                    content: text
+                    content: text // Raw text sent to LLM, no cleaning applied
                 }
             ])
         );
@@ -422,7 +483,8 @@ async function createChunks(text, maxChunkLength, filepath) {
         await logLLMResponse(null, response.choices[0].message.content, OPENAI_SETTINGS.model);
 
         const cleanResponse = removeMarkdownFormatting(response.choices[0].message.content);
-        const result = parseJsonResponse(cleanResponse);
+        // text parameter passed here must match exactly what was sent to LLM for indices to align
+        const result = parseJsonResponse(cleanResponse, text, 'chunk');
 
         if (result.chunks && result.textToRemove) {
             result.chunks = result.chunks.map(chunk => {
@@ -460,7 +522,7 @@ async function summarizeContent(text) {
         );
 
         await logLLMResponse(null, response.choices[0].message.content, OPENAI_SETTINGS.model);
-        const result = parseJsonResponse(response.choices[0].message.content, text, 'summarize');
+        const result = parseJsonResponse(response.choices[0].message.content, null, 'summarize');
         
         // Store in Supabase
         await saveAnalysis(text, 'summary', result);
@@ -484,7 +546,7 @@ async function analyzeSentiment(text) {
         );
 
         await logLLMResponse(null, response.choices[0].message.content, OPENAI_SETTINGS.model);
-        const result = parseJsonResponse(response.choices[0].message.content, text, 'sentiment');
+        const result = parseJsonResponse(response.choices[0].message.content, null, 'sentiment');
         
         // Store in Supabase
         await saveAnalysis(text, 'sentiment', result);
