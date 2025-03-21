@@ -292,7 +292,8 @@ export async function saveAnalysis(content, type, metadata = {}) {
                     document_source_id: documentSourceId,
                     content_hash: contentHash,
                     status: type === 'skipped_duplicate' ? 'skipped_duplicate' : 'pending',
-                    duplicate_of: type === 'skipped_duplicate' ? metadata.duplicate_of : null
+                    duplicate_of: type === 'skipped_duplicate' ? metadata.duplicate_of : null,
+                    category: null
                 })
                 .select()
                 .single();

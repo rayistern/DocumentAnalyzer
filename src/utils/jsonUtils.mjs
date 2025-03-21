@@ -109,7 +109,8 @@ export const sentimentSchema = z.object({
 export const fullMetadataSchema = z.object({
     longDescription: z.string().optional(),
     keywords: z.array(z.string()).optional(),
-    questionsAnswered: z.array(z.string()).optional()
+    questionsAnswered: z.array(z.string()).optional(),
+    category: z.string().optional()
 }).catchall(z.any());
 
 export function cleanJsonResponse(text) {

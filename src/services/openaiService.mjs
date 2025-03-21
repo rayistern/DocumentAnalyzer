@@ -212,6 +212,7 @@ export async function processFile(content, type, filepath, maxChunkLength = OPEN
                             long_description: metadata.longDescription,
                             keywords: metadata.keywords,
                             questions_answered: metadata.questionsAnswered,
+                            category: metadata.category,
                             api_metadata: apiMetadata,
                             status: 'processed', // Add status update to mark as processed
                             updated_at: new Date().toISOString(),
@@ -2123,6 +2124,7 @@ export async function batchProcessFullMetadata(documentIds) {
                     long_description: metadata.longDescription,
                     keywords: metadata.keywords,
                     questions_answered: metadata.questionsAnswered,
+                    category: metadata.category,
                     api_metadata: apiMetadata,
                     updated_at: new Date().toISOString(),
                     input_tokens: metadataResponse.usage?.prompt_tokens || null,
