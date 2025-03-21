@@ -26,7 +26,7 @@ const openai = new OpenAI({
 // Configuration
 const MAX_RECORDS = 100; // Max records to process in one run
 const TEMPERATURE = 0.2;  // Temperature for OpenAI API (0.0 = most deterministic, 1.0 = most creative)
-const MODEL = "gpt-4o-mini"; // Model to use for evaluation
+const MODEL = "gpt-4.5-preview"; // Model to use for evaluation
 
 // Sleep function to add delay between operations
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -135,8 +135,9 @@ async function categorizeQuestions() {
       - FERTILITY: Advice and guidance for pregnancy, birth, and infirtility issues.
       - LIFECYCLE: Grief and mourning, tragedy, condolence, and so on.
       - MOSHIACH: The future redemption, the third holy temple, reincarnation, etc., as well as the mourning over the destruction of the temple and so on.
-      - CHASSIDUT: The Chabad perspective, mysticism, historical notes, and the light which this method shines on all of life. Including deeper philosophical questions like free choice, repentence, etc.
-      - HALACHA: Practices, traditions, and technical situations.
+      - CHASSIDUT: The Chabad perspective, mysticism, historical notes, and the light which this method shines on all of life. Including deeper philosophical questions like free choice, repentence, etc. Only letters which do not fit elsewhere.
+      - HALACHA: Including traditions and technical situations.
+      - GROWTH: Self-help and character improvement; therapy and guidance
       - SOCIETY: Discussion beyond the realm of Judaism, such as humanity at large, the mission of all people, and so on.
 
       Respond only the one word category name from the list above (e.g., "MARRIAGE").`;
@@ -157,7 +158,7 @@ async function categorizeQuestions() {
         console.log(`OpenAI response for document ${doc.id}: "${result}"`);
         
         // Process the result
-        const validCategories = ['ACADEMIC', 'EDUCATION', 'SHLICHUT', 'FESTIVALS', 'BELIEF', 'MARRIAGE', 'HEALTH', 'MONEY', 'CHARITY', 'JOY', 'PURPOSE', 'POLITICS', 'SCIENCE', 'ISRAEL', 'CHILDREN', 'FERTILITY', 'LIFECYCLE', 'MOSHIACH', 'CHASSIDUT', 'HALACHA', 'SOCIETY'];
+        const validCategories = ['ACADEMIC', 'EDUCATION', 'GROWTH', 'SHLICHUT', 'FESTIVALS', 'BELIEF', 'MARRIAGE', 'HEALTH', 'MONEY', 'CHARITY', 'JOY', 'PURPOSE', 'POLITICS', 'SCIENCE', 'ISRAEL', 'CHILDREN', 'FERTILITY', 'LIFECYCLE', 'MOSHIACH', 'CHASSIDUT', 'HALACHA', 'SOCIETY'];
         const category = result.toUpperCase();
         
         if (validCategories.includes(category)) {
