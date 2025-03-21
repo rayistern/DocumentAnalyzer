@@ -146,3 +146,4 @@ Error processing metadata for chunk 3: TypeError: t.replace is not a function
 52. Add title into database (chunkMetadata?)
 53. Whats the value being saved into remainder_text in prechunks?
 54. Where is the cleaned text saved to?
+55. If text is unique then remove it (in cleaning) even if not found within positions.
