@@ -19,8 +19,8 @@ export const OPENAI_SETTINGS = {
         // Models to use for different operations
         operations: {
             clean: "gpt-4o-mini",
-            chunk: "o3-mini",
-            metadata: "gpt-4o-mini",
+            chunk: "gpt-4.5-preview",
+            metadata: "gpt-4.5-preview",
             summarize: "gpt-4o-mini",
             sentiment: "gpt-4o-mini",
             fullMetadata: "gpt-4.5-preview"
@@ -74,7 +74,7 @@ export const OPENAI_PROMPTS = {
     "longDescription": "1-2 paragraphs describing the main content and arguments. Leverage transliterated Hebrew terminology for domain specific terms.",
     "keywords": ["array", "of", "key", "topics", "and", "themes"], -- specific keywords on this specific piece of text or letter, not generic like "chabad" or "jewish"
     "questionsAnswered": ["Question?", "Answer"] -- One Q&A pair: An implied question which the text addresses. This Q&A pair will be used for future training, so please imagine it as a user's question having not seen the text at all, and not specifically referencing this domain per se. Provide a thorough, structured, formatted, long-form response in a conversational LLM style. The response should be well-organized, beginning with a brief summary, followed by structured key points or explanations, and concluding with a strong takeaway or final insight. Include only information that is stated in the text, and only that information which answers the question.
-    "category": ["MARRIAGE"] -- One single category from this list: 'ACADEMIC' (scholarly letters), 'EDUCATION', 'SHLICHUT', 'FESTIVALS' (including all holidays or commemorations), 'BELIEF', 'MARRIAGE' (including dating, divorce, engagement, etc.), 'HEALTH', 'MONEY', 'CHARITY', 'JOY' (and conversely sadness, stress, etc.), 'PURPOSE', 'GROWTH' (self-help and character improvement; therapy and guidance), 'POLITICS', 'SCIENCE', 'ISRAEL', 'CHILDREN', 'FERTILITY' (birth, pregnancy, etc.), 'LIFECYCLE' (grief, mourning, tragedy), 'MOSHIACH' (the time to come, resurrection, third temple, etc.), 'CHASSIDUT' (which does not fall in any other categories), 'HALACHA' (including traditions, etc.), 'SOCIETY' (non-jews, etc.)
+    "category": "CATEGORY" -- One single category from this list: 'ACADEMIC' (scholarly letters), 'EDUCATION', 'SHLICHUT', 'FESTIVALS' (including all holidays or commemorations), 'BELIEF', 'MARRIAGE' (including dating, divorce, engagement, etc.), 'HEALTH', 'MONEY', 'CHARITY', 'JOY' (and conversely sadness, stress, etc.), 'PURPOSE', 'GROWTH' (self-help and character improvement; therapy and guidance), 'POLITICS', 'SCIENCE', 'ISRAEL', 'CHILDREN', 'FERTILITY' (birth, pregnancy, etc.), 'LIFECYCLE' (grief, mourning, tragedy), 'MOSHIACH' (the time to come, resurrection, third temple, etc.), 'CHASSIDUT' (which does not fall in any other categories), 'HALACHA' (including traditions, etc.), 'SOCIETY' (non-jews, etc.)
 }`
         }),
         chunk: (maxChunkLength, isIncomplete = false) => ({

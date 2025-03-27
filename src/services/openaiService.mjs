@@ -1597,8 +1597,9 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                     console.log(`\n⚠️ CHUNK HAS POSITIONS BUT NO TEXT - attempting to extract text from positions`);
                     
                     // Validate positions are within bounds
-                    const start = Math.max(0, chunk.startIndex - 1); // Convert 1-indexed to 0-indexed
-                    const end = Math.min(finalCleanedText.length, chunk.endIndex);
+                    // Use the adjusted positions instead of the original positions
+                    const start = Math.max(0, offsetAdjustedStartIndex); // Already 0-indexed
+                    const end = Math.min(finalCleanedText.length, offsetAdjustedEndIndex);
                     
                     console.log(`Extracting text from positions: ${start} to ${end} (length: ${end-start})`);
                     console.log(`finalCleanedText length: ${finalCleanedText.length}`);
