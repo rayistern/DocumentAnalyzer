@@ -1558,7 +1558,7 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                         chunk.lastWord, 
                         suggestedEndIndex, 
                         false, 
-                        adjustedStartIndex
+                        0  // Don't constrain end position using start position
                     );
                     
                     // Update with adjusted positions (convert back to 1-indexed)
