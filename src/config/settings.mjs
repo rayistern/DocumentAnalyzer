@@ -120,8 +120,8 @@ export const OPENAI_PROMPTS = {
     - quiz_questions (3-5 questions in English. Make sure these can be used standalone and do not ambiguously reference the text.) "[string]"
     - followup_thinking_questions (2-3 deeper analytical questions, in English) "[string]"
     - generated_title (in English) "string"
-    - tags_he (Hebrew, keywords) "[string]"
-    - key_terms_he (domain specific terms/phrases, in the original Hebrew) "[string]"
+    - tags_he (specific keywords or categorizations within the domain corpus itself, not general keywords which apply to the corpus as a whole, Hebrew) "[string]"
+    - key_terms_he (domain specific terminology mentioned here, in the original Hebrew) "[string]"
     - key_phrases_he (important Hebrew quotes) "[string]"
     - key_phrases_en (English translations of key phrases) "[string]"
     - bibliography_snippets (array of citations and references. These will usually not be explicitly stated in the text, rather you should identify quoted text and identify the source. {snippet, source}, Hebrew) [{"snippet": "string", "source": "string"}]
