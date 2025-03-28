@@ -18,7 +18,8 @@ export const documents = pgTable('documents', {
   status: text('status').default('processing'),
   apiMetadata: jsonb('api_metadata'),
   contentHash: text('content_hash'),
-  duplicateOf: uuid('duplicate_of').references(() => documents.id)
+  duplicateOf: uuid('duplicate_of').references(() => documents.id),
+  header: text('header')
 });
 
 

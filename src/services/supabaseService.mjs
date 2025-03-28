@@ -280,6 +280,10 @@ export async function saveAnalysis(content, type, metadata = {}) {
             const contentHash = calculateContentHash(content);
             console.log(`[${timestamp}] Content hash: ${contentHash}`);
 
+            // Extract header (first line)
+            const header = content.split('\n')[0];
+            console.log(`[${timestamp}] Extracted header: "${header.substring(0, Math.min(50, header.length))}${header.length > 50 ? '...' : ''}"`);
+
             // Save initial document
             console.log(`[${timestamp}] 📥 CREATING document record with type=${type}, status=${type === 'skipped_duplicate' ? 'skipped_duplicate' : 'pending'}`);
             const { data: docData, error: docError } = await supabase
@@ -293,7 +297,8 @@ export async function saveAnalysis(content, type, metadata = {}) {
                     content_hash: contentHash,
                     status: type === 'skipped_duplicate' ? 'skipped_duplicate' : 'pending',
                     duplicate_of: type === 'skipped_duplicate' ? metadata.duplicate_of : null,
-                    category: null
+                    category: null,
+                    header
                 })
                 .select()
                 .single();

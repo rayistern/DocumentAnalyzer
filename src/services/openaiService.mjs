@@ -932,6 +932,10 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
     console.log(`Continuation mode: ${isContinuation ? 'ON' : 'OFF'}`);
     console.log(`Group number: ${groupNumber || 'none'}`);
 
+    // Extract header (first line) before any processing
+    const header = content.split('\n')[0];
+    console.log(`Extracted header: "${header.substring(0, Math.min(50, header.length))}${header.length > 50 ? '...' : ''}"`);
+
     // Track remainder text for each pre-chunk
     let remainderText = '';
     
@@ -984,6 +988,13 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         messages: [],
         documentId: document.id
     };
+
+    // Save the header to the document
+    await supabase
+        .from('documents')
+        .update({ header })
+        .eq('id', document.id);
+    console.log(`Saved header to document ${document.id}`);
 
     // Pre-chunk the text
     const preChunks = preChunkText(content, OPENAI_SETTINGS.preChunkSize);
