@@ -416,6 +416,8 @@ export async function saveAnalysis(content, type, metadata = {}) {
                         actual_end: chunk.actual_end,
                         first_word_match: chunk.first_word_match,
                         last_word_match: chunk.last_word_match,
+                        // Add prechunk ID if available
+                        prechunk_id: chunk.prechunk_id || null,
                         // Add token usage fields if they exist in the chunk data
                         input_tokens: chunk.input_tokens || null,
                         output_tokens: chunk.output_tokens || null,

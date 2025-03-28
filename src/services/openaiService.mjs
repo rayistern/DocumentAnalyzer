@@ -1065,6 +1065,23 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
             }
         } else {
             console.log(`Saved pre-chunk ${i + 1} to database successfully`);
+
+            // Get the prechunk ID to associate with chunks later
+            const { data: prechunkData, error: prechunkSelectError } = await supabase
+                .from('prechunks')
+                .select('id')
+                .eq('document_id', document.id)
+                .eq('chunk_index', i)
+                .order('created_at', { ascending: false })
+                .limit(1);
+                
+            if (prechunkSelectError) {
+                console.error(`Error retrieving prechunk ID for prechunk ${i + 1}:`, prechunkSelectError);
+            } else if (prechunkData && prechunkData.length > 0) {
+                // Store the prechunk ID in the preChunks array for later use
+                preChunks[i].prechunkId = prechunkData[0].id;
+                console.log(`Retrieved prechunk ID ${prechunkData[0].id} for prechunk ${i + 1}`);
+            }
             }
         } catch (err) {
             console.error(`Exception saving pre-chunk ${i + 1}:`, err);
@@ -1824,6 +1841,23 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                 chunk.reasoning_tokens = finalChunkResult.tokenUsage?.completion_tokens_details?.reasoning_tokens || null;
                 chunk.cached_tokens = finalChunkResult.tokenUsage?.prompt_tokens_details?.cached_tokens || null;
                 
+                // Find the corresponding prechunk for this chunk
+                let prechunkId = null;
+                // Loop through preChunks to find the one that contains this chunk's start position
+                for (const preChunk of preChunks) {
+                    const startPos = chunk.adjustedStartIndex || chunk.startIndex;
+                    const chunkStartPos = parseInt(startPos);
+                    const preChunkStart = parseInt(preChunk.startPosition);
+                    const preChunkEnd = parseInt(preChunk.endPosition);
+                    
+                    // If the chunk starts within this prechunk's range and we have a stored prechunkId
+                    if (chunkStartPos >= preChunkStart && chunkStartPos <= preChunkEnd && preChunk.prechunkId) {
+                        prechunkId = preChunk.prechunkId;
+                        console.log(`Found matching prechunk ${prechunkId} for chunk starting at position ${chunkStartPos}`);
+                        break;
+                    }
+                }
+                
                 return {
                     ...chunk,
                     /**
@@ -1848,7 +1882,9 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                     llm_suggested_end: chunk.llm_suggested_end || chunk.endIndex,
                     actual_end: chunk.actual_end || (chunk.adjustedEndIndex || chunk.endIndex),
                     first_word_match: chunk.first_word_match || false,
-                    last_word_match: chunk.last_word_match || false
+                    last_word_match: chunk.last_word_match || false,
+                    // Add the prechunk ID reference
+                    prechunk_id: prechunkId
                 };
             });
             
