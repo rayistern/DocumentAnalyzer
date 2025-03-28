@@ -1882,10 +1882,9 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                     console.log(`\n========== CHUNK METADATA PROCESSING ==========`);
                     console.log(`Generating metadata for ${chunksToSave.length} chunks...`);
                     
-                    // Process chunks sequentially to avoid out-of-order issues
-                    for (let i = 0; i < chunksToSave.length; i++) {
-                        const chunk = chunksToSave[i];
-                        console.log(`\n----- Processing metadata for chunk ${i+1}/${chunksToSave.length} -----`);
+                    // Process chunks concurrently instead of sequentially
+                    const metadataPromises = chunksToSave.map(async (chunk, i) => {
+                        console.log(`\n----- Started processing metadata for chunk ${i+1}/${chunksToSave.length} -----`);
                         
                         try {
                             // Only process chunks with actual content
@@ -1924,7 +1923,7 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                                         rawResponse,  // Save the raw response even on error
                                         {usage: metadataResponse.usage}  // Add API metadata with token usage
                                     );
-                                    continue;
+                                    return;
                                 }
                                 
                                 // Add model information to the metadata
@@ -1958,10 +1957,11 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
                             // Continue with next chunk even if this one fails
                         }
                         
-                        // Add a small delay between API calls to avoid rate limiting
-                        await new Promise(resolve => setTimeout(resolve, 1000));
                         console.log(`----- Completed processing for chunk ${i+1}/${chunksToSave.length} -----`);
-                    }
+                    });
+                    
+                    // Wait for all metadata processing to complete
+                    await Promise.all(metadataPromises);
                     
                     console.log(`========== END CHUNK METADATA PROCESSING ==========`);
                 } else if (skipMetadata) {
