@@ -80,13 +80,12 @@ export const OPENAI_PROMPTS = {
         chunk: (maxChunkLength, isIncomplete = false) => ({
             role: "user",
             content: `Segment this text into self-contained sections based on topic shifts. Each chunk should fully capture a concept but remain under ${maxChunkLength} characters - and the longer the better.
-                - Record the exact first and last 2-3 words of each chunk for validation
-                - Each subsequent chunk MUST start right after the previous chunk's ending punctuation
+                - Record the first few words and last the last few words of each chunk for our validation
+                - Each chunk should start right after the previous chunk's end
                 - There MUST NOT be any gaps or overlaps between chunks
-                - Include all punctuation in the chunks, making sure everything is properly escaped
+                - Include all punctuation within the chunks
                 ${isIncomplete ? '- The text will likely spill over past the end of the piece provided to you now. Rather than chunking all the way to the end of this piece, we will save the end of this current piece to prepend to the next piece we will provide you with. We will call that the "Remainder". Therefore, if it seems like the document is cut off at the end, leave the end of the document "unchunked" and specify in the json: "remainder": true' : ''}
                 - If the entire text is one single theme, return a single chunk
-                - Remember that this is Hebrew text, so some characters operate differently than in English and may not indicate the end of a sentence
 
                 Return a valid JSON in the following exact format (no preface):
                 {
