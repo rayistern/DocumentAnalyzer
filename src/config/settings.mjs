@@ -15,15 +15,15 @@ export const OPENAI_SETTINGS = {
     },
     modelConfig: {
         // Models that support JSON response format
-        jsonFormatSupported: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.5-preview', 'o1', 'o3-mini'],
+        jsonFormatSupported: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.5-preview', 'o1', 'o3-mini', 'o4-mini', 'o3', 'gpt-4.1-mini'],
         // Models to use for different operations
         operations: {
-            clean: "gpt-4o-mini",
-            chunk: "o3-mini",
-            metadata: "gpt-4o-mini",
+            clean: "gpt-4.1-mini",
+            chunk: "o4-mini",
+            metadata: "gpt-4.1-mini",
             summarize: "gpt-4o-mini",
             sentiment: "gpt-4o-mini",
-            fullMetadata: "gpt-4.5-preview"
+            fullMetadata: "o3"
         }
     }
 };
@@ -112,7 +112,7 @@ export const OPENAI_PROMPTS = {
     metadata: ( isIncomplete = false) => ({
         role: "user",
         content: `Analyze the given text chunk and provide detailed metadata in JSON format. Each piece of metadata needs to be self contained, not using ambiguous references like 'the text'. ${isIncomplete ? ' Take into account the relative position of the text chunk in the flow of the document.' : ''}
-        The audience is familiar with the domain, retain the original Hebrew terminology for domain specific terms. Aim to only include information from the text, without any conjecture.
+        The audience is familiar with the domain, retain the original Hebrew terminology for domain specific terms. Aim to only include information from the text, without any conjecture. Say you don't know, or skip, when you don't know (like for example if a document has no actual text and is somewhat of an error).
         Include:
     - long_summary (1-2 paragraphs, in English.) "string"
     - short_summary (1-2 sentences, in English) "string"

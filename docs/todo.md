@@ -147,3 +147,5 @@ Error processing metadata for chunk 3: TypeError: t.replace is not a function
 53. Whats the value being saved into remainder_text in prechunks?
 54. Where is the cleaned text saved to?
 55. If text is unique then remove it (in cleaning) even if not found within positions.
+56. Responses endpoint vs chat endpoint
+57. Say you don't know, or skip, when you don't know (like for example if a document has no actual text)
