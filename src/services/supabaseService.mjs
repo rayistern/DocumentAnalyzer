@@ -635,10 +635,10 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata, modelU
         
         // Fix any structure issues with qa_pair (fields incorrectly nested inside qa_pair)
         if (metadata.qa_pair && typeof metadata.qa_pair === 'object') {
-            const { question, answer, potential_typos, identified_abbreviations, named_entities, ...otherProps } = metadata.qa_pair;
+            const { question, answer, potential_typos, identified_abbreviations, named_entities, novel_approaches, ...otherProps } = metadata.qa_pair;
             
             // Check if any fields that should be at root level are in qa_pair
-            if (potential_typos || identified_abbreviations || named_entities) {
+            if (potential_typos || identified_abbreviations || named_entities || novel_approaches) {
                 console.log(`[METADATA-REPAIR] Found fields incorrectly nested in qa_pair for chunk ${chunkIndex}`);
                 
                 // Move fields to root level
@@ -650,6 +650,9 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata, modelU
                 }
                 if (named_entities && !metadata.named_entities) {
                     metadata.named_entities = named_entities;
+                }
+                if (novel_approaches && !metadata.novel_approaches) {
+                    metadata.novel_approaches = novel_approaches;
                 }
                 
                 // Clean qa_pair to only include question and answer
@@ -677,7 +680,8 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata, modelU
             qa_pair: metadata.qa_pair || metadata.qaPair,
             potential_typos: metadata.potential_typos || metadata.potentialTypos,
             identified_abbreviations: metadata.identified_abbreviations || metadata.identifiedAbbreviations,
-            named_entities: metadata.named_entities || metadata.namedEntities
+            named_entities: metadata.named_entities || metadata.namedEntities,
+            novel_approaches: metadata.novel_approaches || metadata.novelApproaches
         };
         
         console.log(`Mapped metadata fields for chunk ${chunkIndex}`);
@@ -781,6 +785,7 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata, modelU
                 mappedMetadata.identified_abbreviations // Pass as direct object for JSONB
                 : null,
             named_entities: Array.isArray(mappedMetadata.named_entities) ? `{${mappedMetadata.named_entities.map(e => typeof e === 'string' ? `"${e.replace(/"/g, '\\"')}"` : `"${String(e)}"`).join(',')}}` : null,
+            novel_approaches: Array.isArray(mappedMetadata.novel_approaches) ? `{${mappedMetadata.novel_approaches.map(a => typeof a === 'string' ? `"${a.replace(/"/g, '\\"')}"` : `"${String(a)}"`).join(',')}}` : null,
             created_at: new Date().toISOString(),
             model_used: modelUsed,
             raw_llm_response: rawLLMResponse,

@@ -130,6 +130,7 @@ export const OPENAI_PROMPTS = {
     - potential_typos (array of possible errors, Original Hebrew) ["string"]
     - identified_abbreviations (array of abbreviations with expansions, Original Hebrew) [{"abbreviation": "string", "expansion": "string"}]
     - named_entities (array of people, places, texts mentioned, Original Hebrew) ["string"]
+    - novel_approaches (Items which we can add to an AI agent's prompt to coerce behavior aligned with the text. Viewpoints or methods which are somewhat unique to this text. For example, 'Always give people the benefit of the doubt', or 'Critically examine the question to find flaws within the premise prior to answering.') ["string"]
 
 Return valid JSON only, no markdown.
 
@@ -203,6 +204,10 @@ Example output:
         "סנהדרין",
         "ערב שבת",
         "רבי"
+    ],
+    "novel_approaches": [
+        "Favor subtle hints (remez) over explicit explanation when conveying profound concepts",
+        "Give people the benefit of the doubt"
     ]
 }
 `

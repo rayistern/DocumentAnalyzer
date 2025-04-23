@@ -89,7 +89,8 @@ export const metadataSchema = z.object({
     potential_typos: z.array(z.string()).optional(),
     identified_abbreviations: z.array(z.any()).optional(), // This is JSONB[] in the database
     identified_abbreviations_jsonb: z.array(z.any()).optional(), // This is JSONB in the database
-    named_entities: z.array(z.string()).optional()
+    named_entities: z.array(z.string()).optional(),
+    novel_approaches: z.array(z.string()).optional()
 }).catchall(z.any()); // Still allow any extra fields for flexibility
 
 // Also create a schema for summarize responses
@@ -476,7 +477,8 @@ export function fixMetadataStructure(parsedObject) {
     const rootLevelFields = [
         'potential_typos',
         'identified_abbreviations', 
-        'named_entities'
+        'named_entities',
+        'novel_approaches'
     ];
     
     // Check if any of these fields are incorrectly nested inside qa_pair
