@@ -128,7 +128,19 @@ function getModelForOperation(operation) {
  * @param {string|null} inMemoryRemainderText - Remainder text from previous document
  * @returns {Object} Processing results based on type
  */
-export async function processFile(content, type, filepath, maxChunkLength = OPENAI_SETTINGS.defaultMaxChunkLength, overview = '', skipMetadata = false, isContinuation = false, groupNumber = null, previousDocumentId = null, inMemoryRemainderText = null) {
+export async function processFile(
+  content,
+  type,
+  filepath,
+  maxChunkLength = OPENAI_SETTINGS.defaultMaxChunkLength,
+  overview = '',
+  skipMetadata = false,
+  isContinuation = false,
+  groupNumber = null,
+  previousDocumentId = null,
+  inMemoryRemainderText = null,
+  lastFileInBatch = false,          // ← NEW
+) {
     try {
         // Add a check for the group number to prevent processing files with unexpected group numbers
         if (groupNumber && groupNumber.includes('igrosgpt4.5-1a') && !groupNumber.includes('test')) {
@@ -147,7 +159,18 @@ export async function processFile(content, type, filepath, maxChunkLength = OPEN
             case 'chunk':
                 return await createChunks(content, maxChunkLength, filepath);
             case 'cleanAndChunk':
-                return await cleanAndChunkDocument(content, maxChunkLength, filepath, overview, skipMetadata, isContinuation, groupNumber, previousDocumentId, inMemoryRemainderText);
+                return await cleanAndChunkDocument(
+                    content,
+                    maxChunkLength,
+                    filepath,
+                    overview,
+                    skipMetadata,
+                    isContinuation,
+                    groupNumber,
+                    previousDocumentId,
+                    inMemoryRemainderText,
+                    lastFileInBatch          // pass through
+                );
             case 'fullMetadata_only':
                 // Save initial document
                 console.log(`\n[${new Date().toISOString()}] 🔍 FULL METADATA ONLY PROCESSING START: ${filepath}`);
@@ -864,7 +887,18 @@ function findBestMatch(words, targetWord, searchArea, areaStartPosition) {
  * @param {string} inMemoryRemainderText - Remainder text from previous document (passed in memory)
  * @returns {Object} Processing results including chunks and warnings
  */
-async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview = '', skipMetadata = false, isContinuation = false, groupNumber = null, previousDocumentId = null, inMemoryRemainderText = null) {
+async function cleanAndChunkDocument(
+  content,
+  maxChunkLength,
+  filepath,
+  overview,
+  skipMetadata,
+  isContinuation,
+  groupNumber,
+  previousDocumentId,
+  inMemoryRemainderText,
+  isIncomplete = false              // ← NEW param
+) {
     console.log('\n=== Starting Document Processing ===');
     console.log(`Total document length: ${content.length} characters`);
     console.log(`Continuation mode: ${isContinuation ? 'ON' : 'OFF'}`);
@@ -1057,7 +1091,7 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
             
         const cleanResponse = await openai.chat.completions.create(
             createApiOptions(getModelForOperation('clean'), [
-                OPENAI_PROMPTS.cleanAndChunk.clean('', true), // Always set isIncomplete=true for continuations
+                OPENAI_PROMPTS.cleanAndChunk.clean(isIncomplete), // Always set isIncomplete=true for continuations
                 {
                     role: "user",
                     content: chunk.text
@@ -1265,7 +1299,7 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         console.log('Sending text for semantic chunking...');
 
         const messages = [
-            OPENAI_PROMPTS.cleanAndChunk.chunk(maxChunkLength, !chunk.isComplete),
+            OPENAI_PROMPTS.cleanAndChunk.chunk(maxChunkLength, isIncomplete),
             {
                 role: "user",
                 content: finalCleanedText  // Use finalCleanedText here
@@ -1276,7 +1310,7 @@ async function cleanAndChunkDocument(content, maxChunkLength, filepath, overview
         console.log('----------------------------------------');
         console.log(`Model: ${getModelForOperation('chunk')}`);
         console.log(`Max chunk length: ${maxChunkLength}`);
-        console.log(`Is incomplete: ${!chunk.isComplete}`);
+        console.log(`Is incomplete: ${isIncomplete}`);
         console.log(`Text length: ${finalCleanedText.length} chars`);
         
         // More detailed logging for the start/end of text
@@ -2138,4 +2172,11 @@ export async function batchProcessFullMetadata(documentIds) {
     }
     
     return { success: true };
+}
+
+export async function getOpenAIEmbedding(text, model = OPENAI_SETTINGS.embedding.model) {
+  const {
+    data: [resp],
+  } = await openai.embeddings.create({ model, input: text });
+  return resp.embedding;
 }

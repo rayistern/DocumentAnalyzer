@@ -2,7 +2,8 @@ import { checkDocumentExists } from '../services/dbService.mjs';
 import { setupProcessTimeout } from '../config.mjs';
 
 async function processBatch(files, options) {
-    for (const file of files) {
+    for (let i = 0; i < files.length; i++) {
+        const file = files[i];
         try {
             // Get just the filename without the path
             const filename = path.basename(file);
@@ -14,10 +15,11 @@ async function processBatch(files, options) {
                 continue;
             }
 
+            // Determine if this is the last file in the batch
+            const isLastFile = (i === files.length - 1);
 
-// Set up the global timeout for all processes
-setupProcessTimeout();
-
+            // Set up the global timeout for all processes
+            setupProcessTimeout();
 
             console.log(`\nProcessing ${filename}...`);
             // ... rest of existing processing code ...

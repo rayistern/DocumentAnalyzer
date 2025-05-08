@@ -80,13 +80,10 @@ export const OPENAI_PROMPTS = {
         }),
         chunk: (maxChunkLength, isIncomplete = false) => ({
             role: "user",
-            content: `Segment this text into self-contained sections based on topic shifts. Each chunk should fully capture a concept but remain under ${maxChunkLength} characters - and the longer the better.
-                - Record the first few words and last the last few words of each chunk for our validation
-                - Each chunk should start right after the previous chunk's end
-                - There MUST NOT be any gaps or overlaps between chunks
-                - Include all punctuation within the chunks
+            content: `Please chunk this text by meaning, into self-contained sections based on topic shifts. Each chunk should fully capture a concept, with a general target chunk length of ${maxChunkLength} characters.
+                - Return also the first few words and last the last few words of each chunk for our validation
                 ${isIncomplete ? '- The text will likely spill over past the end of the piece provided to you now. Rather than chunking all the way to the end of this piece, we will save the end of this current piece to prepend to the next piece we will provide you with. We will call that the "Remainder". Therefore, if it seems like the document is cut off at the end, leave the end of the document "unchunked" and specify in the json: "remainder": true' : ''}
-                - If the entire text is one single theme, return a single chunk
+                - If the entire text is one single theme, return one single chunk
 
                 Return a valid JSON in the following exact format (no preface):
                 {
@@ -214,3 +211,20 @@ Example output:
 `
     })
 };
+
+export default {
+  supabase: {
+    url: process.env.SUPABASE_URL,
+    key: process.env.SUPABASE_KEY,
+  },
+  embedding: {
+    provider: process.env.EMBED_PROVIDER || 'openai',
+    model: process.env.EMBED_MODEL || 'text-embedding-ada-002',
+    dimension: Number(process.env.EMBED_DIM || 1536),
+    batchSize: Number(process.env.EMBED_BATCH || 50),
+    rateLimitMs: Number(process.env.EMBED_DELAY || 1000),
+  },
+  fields: JSON.parse(process.env.EMBED_FIELDS || '[]'), // [{table,column,filter?}]
+  logging: { level: process.env.LOG_LEVEL || 'info' },
+  // ...
+}

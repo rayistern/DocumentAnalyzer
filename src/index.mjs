@@ -161,7 +161,7 @@ program
             // Helper function to delay execution
             const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
             
-            for (const file of files) {
+            for (const [idx, file] of files.entries()) {
                 try {
                     fileCounter++;
                     const filename = path.basename(file);
@@ -203,6 +203,9 @@ program
                     
                     console.log(`[${processTimestamp}] Using processing type: ${options.type}`);
                     
+                    // true ⇢ mark last doc so prompts get isIncomplete flag
+                    const lastDoc = !(await hasFutureProcessable(files, idx, options));
+
                     // Process the text
                     console.log(`[${processTimestamp}] Calling processFile function...`);
                     const result = await processFile(
@@ -214,9 +217,9 @@ program
                         options.skipMetadata,
                         options.continuation,
                         options.group,
-                        null,  // No longer using previousDocumentId at all
-                        // Pass in-memory remainder directly
-                        options.continuation ? remainderText : null
+                        null,  // previousDocumentId
+                        options.continuation ? remainderText : null,
+                        lastDoc
                     );
 
                     console.log(`[${processTimestamp}] ✅ Successfully processed ${filename}`);
@@ -292,4 +295,25 @@ program
         }
     });
 
+program
+    .command('embed')
+    .description('Embed columns from Supabase (flags forwarded to yargs)')
+    .allowUnknownOption(true)          // let yargs consume the flags
+    .action(async () => {
+        const { runEmbeddingJob } = await import('./batch/embedSupabase.mjs');
+        await runEmbeddingJob();
+    });
+
 program.parse();
+
+// helper ─ is there another file left to *process* (not skipped)?
+async function hasFutureProcessable(files, startIdx, opts) {
+  for (let j = startIdx + 1; j < files.length; j++) {
+    const fn = path.basename(files[j]);
+    const exists = opts.localOnly
+      ? false
+      : await checkDocumentExists(fn, opts.reprocessIncomplete, opts.group);
+    if (!exists) return true;       // we found another real job
+  }
+  return false;
+}
