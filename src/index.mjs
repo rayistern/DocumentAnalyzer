@@ -90,7 +90,7 @@ program
     .option('--previousDocumentId <id>', 'ID of the previous document to use for continuation')
     .option('-g, --group <n>', 'group name for the documents')
     .option('--reverse', 'process files in reverse order')
-    .option('--delay <ms>', 'delay in milliseconds between processing files', '40000')
+    .option('--delay <ms>', 'delay in milliseconds between processing files', '20000')
     .option('--local-only', 'only use local files, ignore database for file selection', false)
     .action(async (pattern, options) => {
         try {

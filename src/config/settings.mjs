@@ -5,7 +5,7 @@ export const OPENAI_SETTINGS = {
     defaultMaxChunkLength: 3000,
     textRemovalPositionTolerance: 35,  // Maximum character difference allowed for text removal positions
     preChunkSize: 11000,  // Size for pre-chunking before LLM processing
-    fallbackModels: ["o1-mini", "gpt-4o-mini", "o3-mini"],  // In order of preference
+    fallbackModels: ["o3-mini", "o1-mini", "gpt-4.1-mini"],  // In order of preference
     retryConfig: {
         maxRetries: 3,
         retryDelayMs: 1000
@@ -18,9 +18,9 @@ export const OPENAI_SETTINGS = {
         jsonFormatSupported: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.5-preview', 'o1', 'o3-mini', 'o4-mini', 'o3', 'gpt-4.1-mini'],
         // Models to use for different operations
         operations: {
-            clean: "gpt-4.1-mini",
-            chunk: "o4-mini",
-            metadata: "gpt-4.1-mini",
+            clean: "gpt-4.1",
+            chunk: "o3",
+            metadata: "gpt-4.1",
             summarize: "gpt-4o-mini",
             sentiment: "gpt-4o-mini",
             fullMetadata: "o3"
@@ -75,7 +75,7 @@ export const OPENAI_PROMPTS = {
     "keywords": ["array", "of", "key", "topics", "and", "themes"], -- specific keywords on this specific piece of text or letter, not generic like "chabad" or "jewish"
     "questionsAnswered": ["Question?", "Answer"] -- One Q&A pair: An implied question which the text addresses. This Q&A pair will be used for future training, so please imagine it as a user's question having not seen the text at all, and not specifically referencing this domain per se. Provide a thorough, structured, formatted, long-form response in a conversational LLM style. The response should be well-organized, beginning with a brief summary, followed by structured key points or explanations, and concluding with a strong takeaway or final insight. Include only information that is stated in the text, and only that information which answers the question.
     "category": "CATEGORY" -- One specific category from this list: 'ACADEMIC' (scholarly letters), 'EDUCATION', 'SHLICHUT', 'FESTIVALS' (including all holidays or commemorations), 'BELIEF', 'MARRIAGE' (including dating, divorce, engagement, etc.), 'HEALTH', 'MONEY', 'CHARITY', 'JOY' (and conversely sadness, stress, etc.), 'PURPOSE', 'GROWTH' (self-help and character improvement; therapy and guidance), 'POLITICS', 'SCIENCE', 'ISRAEL', 'CHILDREN', 'FERTILITY' (birth, pregnancy, etc.), 'LIFECYCLE' (grief, mourning, tragedy), 'MOSHIACH' (the time to come, resurrection, third temple, etc.), 'CHASSIDUT' (which does not fall in any other categories), 'HALACHA' (including traditions, etc.), 'SOCIETY' (non-jews, etc.)
-    "novel_approaches": ["Array of viewpoints or methods unique to this text that can guide AI behavior. For example: 'Always give people the benefit of the doubt', or 'Critically examine the question to find flaws within the premise before answering.'"] -- Specific viewpoints and approaches in this text that could guide an AI system's behavior
+    "novel_approaches": ["Array of viewpoints or methods unique to this text that can guide AI behavior across general queries. Using plain English. For example: 'Always give people the benefit of the doubt', or 'Critically examine the question to find flaws within the premise before answering.'"] -- Specific viewpoints and approaches in this text that could guide an AI system's behavior
 }`
         }),
         chunk: (maxChunkLength, isIncomplete = false) => ({
@@ -131,7 +131,7 @@ export const OPENAI_PROMPTS = {
     - potential_typos (array of possible errors, Original Hebrew) ["string"]
     - identified_abbreviations (array of abbreviations with expansions, Original Hebrew) [{"abbreviation": "string", "expansion": "string"}]
     - named_entities (array of people, places, texts mentioned, Original Hebrew) ["string"]
-    - novel_approaches (Items which we can add to an AI agent's prompt to coerce behavior aligned with the text. Viewpoints or methods which are somewhat unique to this text. For example, 'Always give people the benefit of the doubt', or 'Critically examine the question to find flaws within the premise prior to answering.') ["string"]
+    - novel_approaches (Items which we can add to an AI agent's prompt to coerce behavior aligned with the text. Viewpoints or methods which are somewhat unique to this text, yet can be applied in general. Using plain English. For example, 'Always give people the benefit of the doubt', or 'Critically examine the question to find flaws within the premise prior to answering.') ["string"]
 
 Return valid JSON only, no markdown.
 

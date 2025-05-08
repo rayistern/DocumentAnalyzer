@@ -213,6 +213,7 @@ export async function processFile(content, type, filepath, maxChunkLength = OPEN
                             keywords: metadata.keywords,
                             questions_answered: metadata.questionsAnswered,
                             category: metadata.category,
+                            novel_approaches: metadata.novel_approaches,
                             api_metadata: apiMetadata,
                             status: 'processed', // Add status update to mark as processed
                             updated_at: new Date().toISOString(),
@@ -684,113 +685,50 @@ function findCompleteBoundary(text, position, word) {
  * @returns {number} The best position found for the word
  */
 function findWordPosition(text, targetWord, nearPosition, isStart, previousChunkEnd = 0) {
-    // Safety check inputs
-    if (!targetWord || targetWord.length === 0) {
-        console.log(`Warning: Empty target word provided`);
+    /* --- helpers ----------------------------------------------------- */
+    const normalizeSpaces = str => str.replace(/\u00A0/g, ' ');
+    const normalizeText = str => normalizeSpaces(str)
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[.,;:!?'"—–-]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    /* --- validate inputs --------------------------------------------- */
+    nearPosition = Number(nearPosition);
+    if (!targetWord || Number.isNaN(nearPosition)) {
+        return isStart ? previousChunkEnd : 0;
+    }
+
+    /* --- set-up search window ---------------------------------------- */
+    const normalizedTarget = normalizeText(targetWord);
+    const searchStart = Math.max(0, nearPosition - tolerance);
+    const searchEnd   = Math.min(text.length, nearPosition + tolerance);
+    if (searchStart >= searchEnd) {
         return isStart ? previousChunkEnd : nearPosition;
     }
-    
-    // Ensure nearPosition is within text bounds
-    console.log(`\nfindWordPosition input values:`);
-    console.log(`- Target word: "${targetWord}"`);
-    console.log(`- Original nearPosition: ${nearPosition}`);
-    console.log(`- Text length: ${text.length}`);
-    console.log(`- Previous chunk end: ${previousChunkEnd}`);
-    
-    const origNearPosition = nearPosition;  // Store original for logging
-    nearPosition = Math.min(Math.max(0, nearPosition), text.length);
-    if (nearPosition !== origNearPosition) {
-        console.log(`- nearPosition adjusted to: ${nearPosition} (was: ${origNearPosition})`);
-    }
-    
-    // Normalize the target word - remove diacritics and standardize punctuation
-    const normalizeText = (str) => {
-        return str.normalize('NFD')
-            .replace(/[\u0300-\u036f]/g, '')  // Remove diacritics
-            .replace(/[.,;:!?'"—–-]/g, ' ')    // Replace punctuation with spaces
-            .replace(/\s+/g, ' ')              // Normalize spaces
-            .trim();
-    };
-    
-    const normalizedTargetWord = normalizeText(targetWord);
-    console.log(`- Normalized target word: "${normalizedTargetWord}"`);
-    
-    // Define search range with tolerance
-    const searchStart = Math.max(0, nearPosition - tolerance);
-    const searchEnd = Math.min(text.length, nearPosition + tolerance);
-    console.log(`- Search range: ${searchStart}-${searchEnd}`);
-    
-    // If search bounds are invalid, use safe position
-    if (searchStart >= searchEnd) {
-        const result = isStart ? previousChunkEnd : Math.max(nearPosition, previousChunkEnd + 1);
-        console.log(`- Invalid search bounds (${searchStart} >= ${searchEnd})`);
-        console.log(`- Using fallback position: ${result}`);
-        return result;
-    }
-    
-    const searchArea = text.substring(searchStart, searchEnd);
-    console.log(`- Search area length: ${searchArea.length}`);
-    
-    // Try exact match first
-    const exactIndex = searchArea.indexOf(targetWord);
-    if (exactIndex !== -1) {
-        const foundPosition = searchStart + exactIndex;
-        console.log(`Found exact match "${targetWord}" at position ${foundPosition}`);
-        return foundPosition;
-    }
-    console.log(`- No exact match found`);
-    
-    // Try searching for normalized version within normal tolerance first
-    console.log(`Trying normalized match within normal tolerance...`);
+    const searchArea = text.slice(searchStart, searchEnd);
+
+    /* --- 1. exact match ---------------------------------------------- */
+    const exactIdx = normalizeSpaces(searchArea).indexOf(normalizeSpaces(targetWord));
+    if (exactIdx !== -1) return searchStart + exactIdx;
+
+    /* --- 2. normalised / fuzzy search -------------------------------- */
     const words = searchArea.split(/\s+/);
-    let bestMatch = findBestMatch(words, normalizedTargetWord, searchArea, searchStart);
-    
-    if (bestMatch.position !== -1) {
-        console.log(`Found normalized match "${bestMatch.word}" for target "${targetWord}" at position ${bestMatch.position}`);
-        return bestMatch.position;
-    }
+    let best = findBestMatch(words, normalizedTarget, searchArea, searchStart);
+    if (best.position !== -1) return best.position;
 
-    // Try searching in a wider area if first search failed
+    /* wider window */
     const widerStart = Math.max(0, nearPosition - tolerance * 2);
-    const widerEnd = Math.min(text.length, nearPosition + tolerance * 2);
-    const widerArea = text.substring(widerStart, widerEnd);
-    console.log(`\nTrying wider search: ${widerStart}-${widerEnd}`);
-    
-    // Try fuzzy matching within wider area
-    const widerWords = widerArea.split(/\s+/);
-    bestMatch = findBestMatch(widerWords, normalizedTargetWord, widerArea, widerStart);
-    
-    if (bestMatch.position !== -1) {
-        console.log(`Found fuzzy match "${bestMatch.word}" for target "${targetWord}" at position ${bestMatch.position}`);
-        return bestMatch.position;
-    }
+    const widerEnd   = Math.min(text.length, nearPosition + tolerance * 2);
+    const widerArea  = text.slice(widerStart, widerEnd);
+    best = findBestMatch(widerArea.split(/\s+/), normalizedTarget, widerArea, widerStart);
+    if (best.position !== -1) return best.position;
 
-    // If no match found, use suggested position but ensure it's valid
-    console.log(`No match found for "${targetWord}" near ${nearPosition}`);
-    if (isStart) {
-        // For start positions, use the suggested position but ensure it's after previous chunk
-        const safeStart = Math.max(nearPosition, previousChunkEnd);
-        console.log(`Using safe start position: ${safeStart}`);
-        return safeStart;
-    } else {
-        // For end positions:
-        // 1. Calculate intended length from original near position
-        // 2. Ensure we're after the start position
-        // 3. Stay within text bounds
-        // 4. Never collapse to start
-        const intendedLength = nearPosition - previousChunkEnd;
-        console.log(`Intended length from near position: ${intendedLength}`);
-        
-        // Ensure we're at least one character after start and preserve some length
-        const minLength = Math.max(50, intendedLength);  // At least 50 chars or intended length
-        const safeEnd = Math.min(
-            text.length,
-            Math.max(previousChunkEnd + minLength, nearPosition)
-        );
-        
-        console.log(`Using safe end position: ${safeEnd} (minLength: ${minLength})`);
-        return safeEnd;
-    }
+    /* --- 3. fallback -------------------------------------------------- */
+    return isStart
+        ? Math.max(previousChunkEnd, nearPosition)
+        : Math.min(text.length, Math.max(previousChunkEnd + 1, nearPosition));
 }
 
 /**
@@ -2173,6 +2111,7 @@ export async function batchProcessFullMetadata(documentIds) {
                     keywords: metadata.keywords,
                     questions_answered: metadata.questionsAnswered,
                     category: metadata.category,
+                    novel_approaches: metadata.novel_approaches,
                     api_metadata: apiMetadata,
                     updated_at: new Date().toISOString(),
                     input_tokens: metadataResponse.usage?.prompt_tokens || null,
