@@ -327,6 +327,7 @@ program
     .option('--output-dir <dir>', 'output directory', './embeddings')
     .option('--model <model>', 'embedding model')
     .option('--group <group>', 'embedding group name', 'default')
+    .option('--provider <provider>', 'embedding provider', 'openai')
     .action(async (options) => {
         try {
             const { localEmbed } = await import('./batch/localEmbed.mjs');
