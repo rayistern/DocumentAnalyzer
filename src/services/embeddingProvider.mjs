@@ -45,7 +45,14 @@ export async function embed({
     return result; // Return object with embedding and actualModel
   }
   
-  const fn = providers[provider];
+  let fn = providers[provider];
+  // auto-load provider module if missing
+  if (!fn) {
+    try {
+      await import(`../providers/${provider}Provider.mjs`);
+      fn = providers[provider];
+    } catch { /* ignore */ }
+  }
   if (!fn) throw new Error(`Unknown provider ${provider}`);
   return fn(cleanText, model);
 }
