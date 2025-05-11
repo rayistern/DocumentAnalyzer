@@ -13,7 +13,8 @@ export async function localEmbed(args) {
     id, lt, gt,
     outputDir = './embeddings',
     group = 'default',
-    batch = 5, provider, model 
+    batch = 5, provider, model,
+    options
   } = args;
   
   if (!table || !column) {
@@ -48,8 +49,31 @@ export async function localEmbed(args) {
     try {
       logger.info(`⚙️ Processing row ${i+1}/${filtered.length} (id: ${row.id})`);
       
-      // Determine embedding model and filename
-      const filename = `${table}_${row.id}_${column}_${group}_${embeddingModel.replace(/[^a-z0-9]/gi, '_')}.json`;
+      // For local provider, get both embedding and actual model used
+      let vector;
+      let actualModel = embeddingModel;
+      
+      if (embeddingProvider === 'local') {
+        const result = await embed({ 
+          text: row[column],
+          provider: embeddingProvider,
+          model: embeddingModel,
+          strictMode: options?.strict
+        });
+        // Extract embedding and actual model
+        vector = result.embedding;
+        actualModel = result.actualModel || embeddingModel;
+      } else {
+        // Normal embedding for non-local providers
+        vector = await embed({ 
+          text: row[column],
+          provider: embeddingProvider,
+          model: embeddingModel,
+        });
+      }
+      
+      // Use actual model in filename
+      const filename = `${table}_${row.id}_${column}_${group}_${actualModel.replace(/[^a-z0-9]/gi, '_')}.json`;
       const filePath = path.join(outputDir, filename);
       
       // Check if embedding already exists
@@ -60,12 +84,6 @@ export async function localEmbed(args) {
       } catch (err) {
         // File doesn't exist, continue processing
       }
-      
-      const vector = await embed({ 
-        text: row[column],
-        provider: embeddingProvider,
-        model: embeddingModel,
-      });
       
       // Save to local file
       const embeddingData = {

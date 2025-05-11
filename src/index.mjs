@@ -328,6 +328,7 @@ program
     .option('--model <model>', 'embedding model')
     .option('--group <group>', 'embedding group name', 'default')
     .option('--provider <provider>', 'embedding provider', 'openai')
+    .option('--strict', 'fail if specified model is not available', false)
     .action(async (options) => {
         try {
             const { localEmbed } = await import('./batch/localEmbed.mjs');

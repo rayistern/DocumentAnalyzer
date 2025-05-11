@@ -12,6 +12,7 @@ export async function embed({
   text,
   provider = settings.embedding.provider,
   model = settings.embedding.model,
+  options,
 }) {
   // Empty string check
   if (!text || typeof text !== 'string' || text.trim() === '') {
@@ -32,11 +33,14 @@ export async function embed({
                           localModel.includes('dicta-il') ||
                           localModel.toLowerCase().includes('hebrew');
     
-    return localEmbed({ 
+    const result = await localEmbed({ 
       text: cleanText, 
       model: localModel,
-      useHebrewModel: isHebrewModel
+      useHebrewModel: isHebrewModel,
+      strictMode: options?.strictMode || false
     });
+    
+    return result; // Return object with embedding and actualModel
   }
   
   const fn = providers[provider];
