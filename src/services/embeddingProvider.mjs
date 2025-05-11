@@ -24,9 +24,11 @@ export async function embed({
   
   // Handle local models (prefixed with "local:")
   if (provider === 'local' || model?.startsWith('local:')) {
+    // If model has local: prefix, remove it, otherwise use the provided model
+    // Only fall back to default if model is null/undefined
     const localModel = model?.startsWith('local:') 
       ? model.substring(6) // Remove 'local:' prefix
-      : 'Xenova/all-MiniLM-L6-v2'; // Default local model
+      : (model || 'Xenova/all-MiniLM-L6-v2'); // Use specified model or default
     
     // Check if this is a Hebrew-specific model
     const isHebrewModel = localModel.includes('BEREL') || 

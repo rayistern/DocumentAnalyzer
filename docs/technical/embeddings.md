@@ -69,4 +69,46 @@ select *, embedding <-> :vec as dist
 from embeddings
 where model = 'text-embedding-ada-002'
 order by dist limit 5;
-``` 
+```
+
+# Technical Details: Local Embedding Pipeline
+
+## Explicit Model and Pipeline Selection
+
+The embedding system now requires **explicit selection** of both the model and the pipeline/task when using local models.
+
+- The user must provide both `--model` and `--task` on the command line.
+- The code does **not** attempt to infer the correct pipeline/task based on the model name or language.
+- The default pipeline is `feature-extraction` if `--task` is not specified.
+
+## Example CLI Usage
+
+```bash
+node src/index.mjs local-embed \
+  --table chunk_metadata \
+  --column long_summary \
+  --provider local \
+  --model "Xenova/all-MiniLM-L6-v2" \
+  --task sentence-transformers \
+  --strict
+```
+
+## Supported Pipelines
+
+Refer to the [transformers.js pipelines documentation](https://xenova.github.io/transformers.js/pipelines/) for a list of supported pipelines.
+
+- `feature-extraction` (default)
+- `sentence-transformers`
+- ...and others as supported by your model
+
+## Fallback and Strict Mode
+
+- If `--strict` is set, the process will fail if the model cannot be loaded.
+- If `--strict` is not set, the system will attempt to use a fallback model.
+
+## Migration Note
+
+- All previous heuristics for language or model-based pipeline selection have been removed.
+- This change makes the system more predictable and transparent for advanced users.
+
+--- 

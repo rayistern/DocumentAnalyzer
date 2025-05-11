@@ -233,4 +233,66 @@ If you encounter errors with the embedding process:
    npm install @xenova/transformers
    ```
 6. Use --strict flag to see detailed error messages when a model fails to load
-7. When all else fails, specific model errors appear in the log 
+7. When all else fails, specific model errors appear in the log
+
+# Embeddings: Local Model Usage
+
+## Overview
+
+You can generate embeddings using local models via [transformers.js](https://xenova.github.io/transformers.js/).  
+**You must now explicitly specify both the model and the pipeline/task.**  
+There is no longer any automatic detection of language or model type.
+
+---
+
+## Usage
+
+### Example: Feature Extraction (default for most models)
+
+```bash
+node src/index.mjs local-embed \
+  --table chunk_metadata \
+  --column long_summary \
+  --provider local \
+  --model "Xenova/bert-base-multilingual-cased" \
+  --task feature-extraction \
+  --strict
+```
+
+### Example: Sentence Transformers
+
+```bash
+node src/index.mjs local-embed \
+  --table chunk_metadata \
+  --column long_summary \
+  --provider local \
+  --model "Xenova/all-MiniLM-L6-v2" \
+  --task sentence-transformers \
+  --strict
+```
+
+---
+
+## Parameters
+
+- `--model`  
+  The Hugging Face model to use (must be compatible with [transformers.js](https://xenova.github.io/transformers.js/model_support/)).
+
+- `--task`  
+  The pipeline/task to use for the model.  
+  Common values:
+  - `feature-extraction` (default)
+  - `sentence-transformers`
+  - See [transformers.js pipelines](https://xenova.github.io/transformers.js/pipelines/) for more.
+
+- `--strict`  
+  If set, the process will fail if the model cannot be loaded (no fallback).
+
+---
+
+## Notes
+
+- You **must** specify the correct `--task` for your model.
+- There is **no longer any automatic selection** of pipeline/task based on the model name or language.
+- If `--strict` is set and the model cannot be loaded, the process will stop with an error.
+- If `--strict` is not set, the script will attempt to use a fallback model. 

@@ -17,15 +17,15 @@ export async function localEmbed({
   text, 
   model = 'Xenova/all-MiniLM-L6-v2', 
   batchSize = 1,
-  useHebrewModel = false,
-  strictMode = false
+  strictMode = false,
+  task
 }) {
   try {
-    // Special handling for BEREL/Hebrew models
+    logger.info(`strictMode value: ${strictMode}`);
     const modelKey = model;
     let actualModel = model; // Track which model was actually used
     
-    logger.info(`🔍 Attempting to use model: ${model} (Hebrew-specific: ${useHebrewModel})`);
+    logger.info(`🔍 Attempting to use model: ${model} with task: ${task || 'feature-extraction'}`);
     
     // Check if @xenova/transformers is installed correctly
     try {
@@ -42,15 +42,14 @@ export async function localEmbed({
       logger.info(`🔄 Loading local embedding model: ${model}`);
       
       try {
-        // For BEREL we need to use sentence-transformers pipeline specifically
-        const task = useHebrewModel ? 'sentence-transformers' : 'feature-extraction';
-        logger.info(`Using task type: ${task}`);
+        // Use the user-specified task, or default to 'feature-extraction'
+        const pipelineTask = task || 'feature-extraction';
+        logger.info(`Using task type: ${pipelineTask}`);
         
         // Attempt to load the model
         logger.info('Initializing model pipeline...');
-        const embedder = await pipeline(task, model, {
-          quantized: !useHebrewModel, // Don't quantize specialized models
-          revision: useHebrewModel ? 'main' : null
+        const embedder = await pipeline(pipelineTask, model, {
+          quantized: true
         });
         
         logger.info('✅ Model loaded successfully!');
@@ -60,7 +59,10 @@ export async function localEmbed({
         
         // If strict mode, don't fall back and fail instead
         if (strictMode) {
-          throw new Error(`Model '${model}' failed to load in strict mode: ${modelError.message}`);
+          // Include stack and error type for easier debugging
+          throw new Error(
+            `Model '${model}' failed to load in strict mode: ${modelError && modelError.stack ? modelError.stack : modelError.message || modelError}`
+          );
         }
         
         // Fallback to a known working model
@@ -84,20 +86,12 @@ export async function localEmbed({
     // Generate embeddings
     logger.info(`⚙️ Generating embeddings with actual model: ${actualModel}`);
     
-    // Different handling based on model type
-    let embedding;
-    if (useHebrewModel && actualModel === model) { // Only use Hebrew path if we didn't fall back
-      logger.info('Using Hebrew-specific embedding path');
-      const result = await embedder(text);
-      embedding = Array.from(result.data);
-    } else {
-      logger.info('Using standard embedding path');
-      const result = await embedder(text, {
-        pooling: 'mean',
-        normalize: true,
-      });
-      embedding = Array.from(result.data);
-    }
+    // Always use the same embedding call, let the user pick the right pipeline
+    const result = await embedder(text, {
+      pooling: 'mean',
+      normalize: true,
+    });
+    const embedding = Array.from(result.data);
     
     logger.info(`✅ Generated embedding with dimension: ${embedding.length} using model: ${actualModel}`);
     

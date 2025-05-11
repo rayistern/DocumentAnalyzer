@@ -46,6 +46,9 @@ export async function localEmbed(args) {
     const embeddingModel = model || settings.embedding?.model || 'text-embedding-ada-002';
     const embeddingProvider = provider || settings.embedding?.provider || 'openai';
     
+    // Set strictMode for this row based on CLI flag
+    const strictMode = options?.strict ?? options?.strictMode ?? false;
+    
     try {
       logger.info(`⚙️ Processing row ${i+1}/${filtered.length} (id: ${row.id})`);
       
@@ -58,7 +61,11 @@ export async function localEmbed(args) {
           text: row[column],
           provider: embeddingProvider,
           model: embeddingModel,
-          strictMode: options?.strict
+          options: {
+            ...(options || {}),
+            strictMode,
+            task: options?.task
+          }
         });
         // Extract embedding and actual model
         vector = result.embedding;
@@ -104,17 +111,17 @@ export async function localEmbed(args) {
       );
       
       logger.info(`✅ Embedded and saved row ${row.id} to ${filename}`);
-    } catch (e) {
-      logger.error(`❌ Error with row ${row.id}:`, JSON.stringify({
-        message: e.message || 'Unknown error',
-        name: e.name,
-        stack: e.stack?.split('\n')[0],
-        response: e.response?.data || e.response
-      }));
-      
-      // Try fallback model
+    } catch (err) {
+      logger.error(`❌ Error with row ${row.id}:`, err);
+
+      // Only fallback if strictMode is not set
+      if (strictMode) {
+        logger.error(`❌ Skipping fallback for row ${row.id} due to strictMode.`);
+        throw err; // Stop the process entirely. Use 'continue;' to skip just this row.
+      }
+
+      logger.info('⚠️ Trying fallback embedding model...');
       try {
-        logger.info(`⚠️ Trying fallback embedding model...`);
         const fallbackModel = 'text-embedding-ada-002';
         
         const vector = await embed({ 
