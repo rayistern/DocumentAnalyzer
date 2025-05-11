@@ -305,6 +305,7 @@ program
     .option('--gt <value>', 'id greater than value')
     .option('--batch <size>', 'batch size', '5')
     .option('--model <model>', 'embedding model')
+    .option('--group <group>', 'embedding group name', 'default')
     .action(async (options) => {
         try {
             const { basicEmbed } = await import('./batch/basicEmbed.mjs');
@@ -325,6 +326,7 @@ program
     .option('--gt <value>', 'id greater than value')
     .option('--output-dir <dir>', 'output directory', './embeddings')
     .option('--model <model>', 'embedding model')
+    .option('--group <group>', 'embedding group name', 'default')
     .action(async (options) => {
         try {
             const { localEmbed } = await import('./batch/localEmbed.mjs');

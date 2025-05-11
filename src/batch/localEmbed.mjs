@@ -12,6 +12,7 @@ export async function localEmbed(args) {
     table, column, 
     id, lt, gt,
     outputDir = './embeddings',
+    group = 'default',
     batch = 5, provider, model 
   } = args;
   
@@ -47,6 +48,19 @@ export async function localEmbed(args) {
     try {
       logger.info(`⚙️ Processing row ${i+1}/${filtered.length} (id: ${row.id})`);
       
+      // Determine embedding model and filename
+      const filename = `${table}_${row.id}_${column}_${group}_${embeddingModel.replace(/[^a-z0-9]/gi, '_')}.json`;
+      const filePath = path.join(outputDir, filename);
+      
+      // Check if embedding already exists
+      try {
+        await fs.access(filePath);
+        logger.info(`⏩ Skipping row ${row.id} - embedding already exists for group "${group}"`);
+        continue; // Skip to next row
+      } catch (err) {
+        // File doesn't exist, continue processing
+      }
+      
       const vector = await embed({ 
         text: row[column],
         provider: embeddingProvider,
@@ -58,6 +72,7 @@ export async function localEmbed(args) {
         source_table: table,
         source_pk: row.id,
         source_column: column,
+        group: group,
         model: embeddingModel,
         provider: embeddingProvider,
         dim: vector.length,
@@ -65,9 +80,8 @@ export async function localEmbed(args) {
         created_at: new Date().toISOString()
       };
       
-      const filename = `${table}_${row.id}_${column}_${embeddingModel.replace(/[^a-z0-9]/gi, '_')}.json`;
       await fs.writeFile(
-        path.join(outputDir, filename), 
+        filePath, 
         JSON.stringify(embeddingData, null, 2)
       );
       
@@ -96,6 +110,7 @@ export async function localEmbed(args) {
           source_table: table,
           source_pk: row.id,
           source_column: column,
+          group: group,
           model: fallbackModel,
           provider: 'openai',
           dim: vector.length,
@@ -103,9 +118,20 @@ export async function localEmbed(args) {
           created_at: new Date().toISOString()
         };
         
-        const filename = `${table}_${row.id}_${column}_${fallbackModel.replace(/[^a-z0-9]/gi, '_')}.json`;
+        const filename = `${table}_${row.id}_${column}_${group}_${fallbackModel.replace(/[^a-z0-9]/gi, '_')}.json`;
+        const filePath = path.join(outputDir, filename);
+        
+        // Check if embedding already exists
+        try {
+          await fs.access(filePath);
+          logger.info(`⏩ Skipping row ${row.id} - embedding already exists for group "${group}"`);
+          continue; // Skip to next row
+        } catch (err) {
+          // File doesn't exist, continue processing
+        }
+        
         await fs.writeFile(
-          path.join(outputDir, filename), 
+          filePath, 
           JSON.stringify(embeddingData, null, 2)
         );
         
@@ -133,6 +159,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       column: 'long_summary',
       lt: 11,
       outputDir: './embeddings',
+      group: 'default',
       model: 'text-embedding-ada-002',
       provider: 'openai'
     };

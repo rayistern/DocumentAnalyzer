@@ -9,6 +9,7 @@ export async function basicEmbed(args) {
   const { 
     table, column, 
     id, lt, gt,
+    group = 'default',
     batch = 5, provider, model 
   } = args;
   
@@ -37,6 +38,26 @@ export async function basicEmbed(args) {
     const row = filtered[i];
     try {
       logger.info(`⚙️ Processing row ${i+1}/${filtered.length} (id: ${row.id})`);
+      
+      // Check if embedding already exists in Supabase
+      const embeddingModel = model || settings.embedding?.model;
+      const { data: existingEmbedding, error: checkError } = await supabase
+        .from('embeddings')
+        .select('id')
+        .eq('source_table', table)
+        .eq('source_pk', row.id)
+        .eq('source_column', column)
+        .eq('group', group)
+        .eq('model', embeddingModel)
+        .maybeSingle();
+      
+      if (checkError) {
+        logger.warn(`⚠️ Error checking existing embedding for row ${row.id}:`, checkError.message);
+      } else if (existingEmbedding) {
+        logger.info(`⏩ Skipping row ${row.id} - embedding already exists for group "${group}"`);
+        continue; // Skip to next row
+      }
+      
       const vector = await embed({ 
         text: row[column],
         provider: provider || settings.embedding?.provider,
@@ -47,6 +68,7 @@ export async function basicEmbed(args) {
         source_table: table,
         source_pk: row.id,
         source_column: column,
+        group: group,
         model: model || settings.embedding?.model,
         dim: vector.length,
         embedding: vector,
@@ -78,6 +100,7 @@ export async function basicEmbed(args) {
             source_table: table,
             source_pk: row.id,
             source_column: column,
+            group: group,
             model: fallbackModel,
             dim: vector.length,
             embedding: vector,
@@ -108,6 +131,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       table: 'chunk_metadata',
       column: 'long_summary',
       lt: 11,
+      group: 'default',
       model: 'text-embedding-ada-002',
       provider: 'openai'
     };

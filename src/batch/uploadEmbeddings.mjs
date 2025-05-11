@@ -34,6 +34,7 @@ export async function uploadEmbeddings(args) {
           source_table: data.source_table,
           source_pk: data.source_pk,
           source_column: data.source_column,
+          group: data.group || 'default',
           model: data.model,
           dim: data.dim,
           embedding: data.embedding
@@ -48,7 +49,7 @@ export async function uploadEmbeddings(args) {
       try {
         const { error } = await supabase.from('embeddings').upsert(
           embeddings,
-          { onConflict: 'source_table,source_pk,source_column,model' }
+          { onConflict: 'source_table,source_pk,source_column,group,model' }
         );
         
         if (error) throw error;

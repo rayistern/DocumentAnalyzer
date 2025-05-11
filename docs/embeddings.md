@@ -24,10 +24,11 @@ node src/index.mjs basic-embed --table <table> --column <column> [options]
 - `--gt` - Filter for IDs greater than value
 - `--batch` - Batch size (default: 5)
 - `--model` - Embedding model (default from settings)
+- `--group` - Embedding group name (default: 'default')
 
 **Example:**
 ```bash
-node src/index.mjs basic-embed --table chunk_metadata --column long_summary --lt 100
+node src/index.mjs basic-embed --table chunk_metadata --column long_summary --lt 100 --model text-embedding-ada-002
 ```
 
 ### 2. Local Embedding Files
@@ -82,6 +83,27 @@ node src/index.mjs basic-embed --table chunk_metadata --column long_summary
    node src/index.mjs upload-embeddings
    ```
 
+### Using Multiple Embedding Models (Groups)
+
+You can maintain multiple embedding models for the same data by using different group names:
+
+```bash
+# Generate OpenAI Ada embeddings
+node src/index.mjs local-embed --table chunk_metadata --column long_summary --model text-embedding-ada-002 --group openai-ada
+
+# Generate another model's embeddings
+node src/index.mjs local-embed --table chunk_metadata --column long_summary --model text-embedding-3-small --group openai-e3-small
+
+# Upload all embeddings
+node src/index.mjs upload-embeddings
+```
+
+This approach allows:
+- Parallel searches with different models
+- A/B testing between embedding models
+- Gradual migration to newer models
+- Using specialized models for different query types
+
 ### Processing Multiple Columns
 
 Process different text columns:
@@ -105,15 +127,18 @@ Embeddings are stored in the `embeddings` table with this schema:
 - `source_table` - Source table name
 - `source_pk` - Primary key in source table
 - `source_column` - Column that was embedded
+- `group` - Embedding group name (allows multiple embedding models per content)
 - `model` - Embedding model used
 - `dim` - Vector dimensions
 - `embedding` - The vector data
+
+The unique constraint ensures you can have multiple embeddings for the same content, as long as they're in different groups or use different models.
 
 ### Local JSON Files
 
 Local embedding files use the naming convention:
 ```
-{table}_{id}_{column}_{model}.json
+{table}_{id}_{column}_{group}_{model}.json
 ```
 
 Example file contents:
@@ -122,6 +147,7 @@ Example file contents:
   "source_table": "chunk_metadata",
   "source_pk": 42,
   "source_column": "long_summary",
+  "group": "openai-ada",
   "model": "text-embedding-ada-002",
   "provider": "openai",
   "dim": 1536,
@@ -129,6 +155,14 @@ Example file contents:
   "created_at": "2024-05-08T22:45:12.123Z"
 }
 ```
+
+## Skip Behavior
+
+Both local and database embedding commands will check for existing embeddings and skip rows that already have embeddings for the specified group and model. This allows you to:
+
+- Resume interrupted embedding jobs
+- Update only specific rows while skipping existing ones
+- Add new embedding models without reprocessing everything
 
 ## Troubleshooting
 
