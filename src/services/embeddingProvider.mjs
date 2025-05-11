@@ -27,9 +27,15 @@ export async function embed({
       ? model.substring(6) // Remove 'local:' prefix
       : 'Xenova/all-MiniLM-L6-v2'; // Default local model
     
+    // Check if this is a Hebrew-specific model
+    const isHebrewModel = localModel.includes('BEREL') || 
+                          localModel.includes('dicta-il') ||
+                          localModel.toLowerCase().includes('hebrew');
+    
     return localEmbed({ 
       text: cleanText, 
-      model: localModel 
+      model: localModel,
+      useHebrewModel: isHebrewModel
     });
   }
   
