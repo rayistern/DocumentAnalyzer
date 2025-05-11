@@ -59,12 +59,15 @@ export async function checkDocumentExists(filename, reprocessIncomplete = false,
         .gt('created_at', fiveMinutesAgo);
         
     if (!recentError && recentData?.length) {
-        console.log(`[${timestamp}] ⚠️ Found ${recentData.length} recent entries for this file (created in last 5 minutes):`);
-        recentData.forEach((doc, i) => {
-            console.log(`[${timestamp}]   ${i+1}. Filename: ${doc.filename} | Status: ${doc.status} | Group: ${doc.group_number || 'none'} | Created: ${doc.created_at}`);
-        });
-        console.log(`[${timestamp}] ❌ File appears to be currently processing in another session - skipping to prevent conflicts`);
-        return true; // Treat as existing to prevent concurrent processing
+        const recentRelevant = recentData.filter(r => !groupNumber || r.group_number === groupNumber);
+        if (recentRelevant.length) {
+            console.log(`[${timestamp}] ⚠️ Found ${recentRelevant.length} recent entries for this file in group ${groupNumber || 'any'} (last 5 min):`);
+            recentRelevant.forEach((doc, i) => {
+                console.log(`[${timestamp}]   ${i+1}. Filename: ${doc.filename} | Status: ${doc.status} | Group: ${doc.group_number || 'none'} | Created: ${doc.created_at}`);
+            });
+            console.log(`[${timestamp}] ❌ File appears to be currently processing in this group - skipping to prevent conflicts`);
+            return true; // conflict
+        }
     }
     
     // First check: exact match with group filter

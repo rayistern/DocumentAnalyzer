@@ -80,9 +80,8 @@ export const OPENAI_PROMPTS = {
         }),
         chunk: (maxChunkLength, isIncomplete = false) => ({
             role: "user",
-            content: `Please chunk this text by meaning, into self-contained sections based on topic shifts. Each chunk should fully capture a concept, with a general target chunk length of ${maxChunkLength} characters.
-                - Return also the first few words and last the last few words of each chunk for our validation
-                ${isIncomplete ? '- The text will likely spill over past the end of the piece provided to you now. Rather than chunking all the way to the end of this piece, we will save the end of this current piece to prepend to the next piece we will provide you with. We will call that the "Remainder". Therefore, if it seems like the document is cut off at the end, leave the end of the document "unchunked" and specify in the json: "remainder": true' : ''}
+            content: `Please chunk this text by *meaning*.
+                ${isIncomplete ? '- The text will likely spill over past the end of the piece provided to you now. Rather than chunking all the way to the end of this piece, we will save the end of this current piece to prepend to the next piece we will provide you with. We will call that the "Remainder". Therefore, if it seems like the document is cut off at the end, leave the end of the document "unchunked" and specify in the json: "remainder": true' : 'The text will probablyh not spill over to the next page, but if it does, then leave the end of the document "unchunked", and indicate in the json: "remainder": true. If not, then make sure your chunks reach to the end of the document.'}
                 - If the entire text is one single theme, return one single chunk
 
                 Return a valid JSON in the following exact format (no preface):
@@ -95,7 +94,7 @@ export const OPENAI_PROMPTS = {
                             "lastWords": "the lazy dog."
                         }
                     ],
-                    "remainder": true
+                    "remainder": false
                 }`
         })
     },

@@ -1,6 +1,10 @@
+import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
 import settings from '../config/settings.mjs';
 
-export default createClient(settings.supabase.url, settings.supabase.key, {
-  auth: { persistSession: false },
-}); 
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_ANON_KEY
+);
+
+export default supabase; 

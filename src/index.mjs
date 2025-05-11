@@ -296,12 +296,58 @@ program
     });
 
 program
-    .command('embed')
-    .description('Embed columns from Supabase (flags forwarded to yargs)')
-    .allowUnknownOption(true)          // let yargs consume the flags
-    .action(async () => {
-        const { runEmbeddingJob } = await import('./batch/embedSupabase.mjs');
-        await runEmbeddingJob();
+    .command('basic-embed')
+    .description('Simpler embedding with direct filters (no JSON parsing)')
+    .option('--table <table>', 'source table')
+    .option('--column <column>', 'source column')
+    .option('--id <id>', 'exact id match')
+    .option('--lt <value>', 'id less than value')
+    .option('--gt <value>', 'id greater than value')
+    .option('--batch <size>', 'batch size', '5')
+    .option('--model <model>', 'embedding model')
+    .action(async (options) => {
+        try {
+            const { basicEmbed } = await import('./batch/basicEmbed.mjs');
+            await basicEmbed(options);
+        } catch (error) {
+            console.error('❌ Basic embedding failed:', error);
+            process.exit(1);
+        }
+    });
+
+program
+    .command('local-embed')
+    .description('Embed content and save to local files instead of Supabase')
+    .option('--table <table>', 'source table')
+    .option('--column <column>', 'source column')
+    .option('--id <id>', 'exact id match')
+    .option('--lt <value>', 'id less than value')
+    .option('--gt <value>', 'id greater than value')
+    .option('--output-dir <dir>', 'output directory', './embeddings')
+    .option('--model <model>', 'embedding model')
+    .action(async (options) => {
+        try {
+            const { localEmbed } = await import('./batch/localEmbed.mjs');
+            await localEmbed(options);
+        } catch (error) {
+            console.error('❌ Local embedding failed:', error);
+            process.exit(1);
+        }
+    });
+
+program
+    .command('upload-embeddings')
+    .description('Upload local embeddings to Supabase')
+    .option('--dir <dir>', 'directory with embedding files', './embeddings')
+    .option('--batch-size <size>', 'upload batch size', '20')
+    .action(async (options) => {
+        try {
+            const { uploadEmbeddings } = await import('./batch/uploadEmbeddings.mjs');
+            await uploadEmbeddings(options);
+        } catch (error) {
+            console.error('❌ Upload failed:', error);
+            process.exit(1);
+        }
     });
 
 program.parse();
