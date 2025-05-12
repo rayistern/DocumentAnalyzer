@@ -541,10 +541,17 @@ async function createChunks(text, maxChunkLength, filepath) {
 
     if (result.chunks && result.textToRemove) {
         result.chunks = result.chunks.map(chunk => {
-            const originalText = text.slice(chunk.startIndex - 1, chunk.endIndex);
+            // LLM returns 1-based → convert to 0-based inclusive
+            const zeroStart = chunk.startIndex - 1;
+            const zeroEnd   = chunk.endIndex   - 1;
+            const originalText = cpSlice(text, zeroStart, zeroEnd);
             const cleanedText = cleanText(originalText, result.textToRemove);
+            chunk.startIndex = zeroStart;
+            chunk.endIndex   = zeroEnd;
             return {
                 ...chunk,
+                startIndex: zeroStart,
+                endIndex  : zeroEnd,
                 originalText,
                 cleanedText
             };
@@ -622,7 +629,7 @@ function validateChunks(chunks, effectiveLength, originalLength) {
         }
 
         // Check if chunk end index exceeds text length
-        if (chunk.endIndex > originalLength) {
+        if (chunk.endIndex >= originalLength) {
             chunkWarnings.push(`Chunk end index (${chunk.endIndex}) exceeds text length (${originalLength})`);
             // Signal to stop processing further chunks
             chunk.drop_remaining = true;
@@ -2126,3 +2133,6 @@ export async function getOpenAIEmbedding(text, model = OPENAI_SETTINGS.embedding
   } = await openai.embeddings.create({ model, input: text });
   return resp.embedding;
 }
+
+// Slice by Unicode-code-point with inclusive end index
+const cpSlice = (str, start, endInc) => Array.from(str).slice(start, endInc + 1).join('');
