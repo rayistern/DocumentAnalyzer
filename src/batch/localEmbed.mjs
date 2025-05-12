@@ -195,4 +195,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     logger.error('Failed in direct execution:', error);
     process.exit(1);
   }
+}
+
+async function processFilesInDirectory(directory) {
+    const files = await fs.readdir(directory);
+    // If you want to ensure numeric order with padding:
+    files.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+    for (const file of files) {
+        // ... process each file ...
+    }
 } 

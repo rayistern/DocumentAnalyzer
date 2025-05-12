@@ -11,6 +11,7 @@ import { convertToText } from './utils/documentConverter.mjs';
 import { checkDocumentExists, getLastProcessedDocument } from './services/dbService.mjs';
 import { saveAnalysis } from './services/supabaseService.mjs';
 import { setupProcessTimeout } from './config.mjs';
+import fs from 'fs/promises';
 
 dotenv.config();
 
@@ -366,4 +367,13 @@ async function hasFutureProcessable(files, startIdx, opts) {
     if (!exists) return true;       // we found another real job
   }
   return false;
+}
+
+async function main() {
+    const files = await fs.readdir(someDirectory);
+    // If you want to ensure numeric order with padding:
+    files.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+    for (const file of files) {
+        // ... process each file ...
+    }
 }

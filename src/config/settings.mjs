@@ -5,7 +5,7 @@ export const OPENAI_SETTINGS = {
     defaultMaxChunkLength: 3000,
     textRemovalPositionTolerance: 35,  // Maximum character difference allowed for text removal positions
     preChunkSize: 11000,  // Size for pre-chunking before LLM processing
-    fallbackModels: ["o3-mini", "o1-mini", "gpt-4.1-mini"],  // In order of preference
+    fallbackModels: ["o4-mini", "o3-mini", "gpt-4.1-mini"],  // In order of preference
     retryConfig: {
         maxRetries: 3,
         retryDelayMs: 1000
@@ -15,12 +15,12 @@ export const OPENAI_SETTINGS = {
     },
     modelConfig: {
         // Models that support JSON response format
-        jsonFormatSupported: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.5-preview', 'o1', 'o3-mini', 'o4-mini', 'o3', 'gpt-4.1-mini'],
+        jsonFormatSupported: ['gpt-4o', 'gpt-4.1-mini', 'gpt-4.5-preview', 'o1', 'o3-mini', 'o4-mini', 'o3', 'gpt-4o-mini'],
         // Models to use for different operations
         operations: {
-            clean: "gpt-4.1",
-            chunk: "o3",
-            metadata: "gpt-4.1",
+            clean: "gpt-4.1-mini",
+            chunk: "o4-mini",
+            metadata: "gpt-4.1-mini",
             summarize: "gpt-4o-mini",
             sentiment: "gpt-4o-mini",
             fullMetadata: "o3"
