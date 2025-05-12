@@ -71,6 +71,14 @@ function createApiOptions(model, messages) {
         messages
     };
     
+    // ⬇️ new debug output
+    if (process.env.LOG_PROMPTS === 'true') {
+        console.log('\n========= LLM PROMPT =========');
+        console.log(`Model: ${model}`);
+        console.log(JSON.stringify(messages, null, 2));
+        console.log('==============================\n');
+    }
+    
     // Only add response_format for models that explicitly support it
     if (model.startsWith('gpt-4o')) {
         options.response_format = { type: "json_object" };
