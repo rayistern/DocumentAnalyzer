@@ -513,63 +513,42 @@ export function removeMarkdownFormatting(text) {
 }
 
 async function createChunks(text, maxChunkLength, filepath) {
-    /**
-     * NOTE: This function has a potentially problematic workflow compared to cleanAndChunkDocument:
-     * 
-     * 1. It sends raw, uncleaned text directly to the LLM for chunking
-     * 2. The LLM returns indices based on this uncleaned text
-     * 3. Only afterward does it try to clean each chunk individually
-     * 
-     * This is different from the preferred workflow in cleanAndChunkDocument which:
-     * 1. Pre-chunks the text into manageable pieces
-     * 2. Cleans each pre-chunk first (removes headers, footers)
-     * 3. Prepends remainder text from previous iterations
-     * 4. Then sends the clean text to the LLM for semantic chunking
-     * 
-     * If this function is used, chunk boundaries may not align with semantic 
-     * boundaries after cleaning because they were determined on uncleaned text.
-     */
-    try {
-        const response = await openai.chat.completions.create(
-            createApiOptions(getModelForOperation('chunk'), [
-                {
-                    role: OPENAI_PROMPTS.chunk.role,
-                    content: OPENAI_PROMPTS.chunk.content(maxChunkLength)
-                },
-                {
-                    role: "user",
-                    content: text // Raw text sent to LLM, no cleaning applied
-                }
-            ])
-        );
+    const chunkPrompt = OPENAI_PROMPTS.chunk.content(maxChunkLength);
+    const combinedPrompt = `${chunkPrompt}\n\n---\n\n${text}`;
 
-        await logLLMResponse(null, response.choices[0].message.content, OPENAI_SETTINGS.model);
+    const response = await openai.chat.completions.create(
+        createApiOptions(getModelForOperation('chunk'), [
+            {
+                role: "user",
+                content: combinedPrompt
+            }
+        ])
+    );
 
-        const cleanResponse = removeMarkdownFormatting(response.choices[0].message.content);
-        // text parameter passed here must match exactly what was sent to LLM for indices to align
-        const result = parseJsonResponse(cleanResponse, text, 'chunk');
+    await logLLMResponse(null, response.choices[0].message.content, OPENAI_SETTINGS.model);
 
-        if (result.chunks && result.textToRemove) {
-            result.chunks = result.chunks.map(chunk => {
-                const originalText = text.slice(chunk.startIndex - 1, chunk.endIndex);
-                const cleanedText = cleanText(originalText, result.textToRemove);
-                return {
-                    ...chunk,
-                    originalText,
-                    cleanedText
-                };
-            });
-        }
+    const cleanResponse = removeMarkdownFormatting(response.choices[0].message.content);
+    // text parameter passed here must match exactly what was sent to LLM for indices to align
+    const result = parseJsonResponse(cleanResponse, text, 'chunk');
 
-        result.warnings = validateChunks(result.chunks, result.textToRemove.length, text.length);
-        
-        // Store in Supabase
-        await saveAnalysis(text, 'chunk', { ...result, filepath });
-        
-        return result;
-    } catch (error) {
-        throw new Error(`Chunk creation failed: ${error.message}`);
+    if (result.chunks && result.textToRemove) {
+        result.chunks = result.chunks.map(chunk => {
+            const originalText = text.slice(chunk.startIndex - 1, chunk.endIndex);
+            const cleanedText = cleanText(originalText, result.textToRemove);
+            return {
+                ...chunk,
+                originalText,
+                cleanedText
+            };
+        });
     }
+
+    result.warnings = validateChunks(result.chunks, result.textToRemove.length, text.length);
+    
+    // Store in Supabase
+    await saveAnalysis(text, 'chunk', { ...result, filepath });
+    
+    return result;
 }
 
 async function summarizeContent(text) {
@@ -1298,57 +1277,16 @@ async function cleanAndChunkDocument(
          */
         console.log('Sending text for semantic chunking...');
 
+        const chunkPrompt = OPENAI_PROMPTS.cleanAndChunk.chunk(maxChunkLength, isIncomplete).content;
+        const combinedPrompt = `${chunkPrompt}\n\n---\n\n${finalCleanedText}`;
+
         const messages = [
-            OPENAI_PROMPTS.cleanAndChunk.chunk(maxChunkLength, isIncomplete),
             {
                 role: "user",
-                content: finalCleanedText  // Use finalCleanedText here
+                content: combinedPrompt
             }
         ];
-        
-        console.log(`\n4. CHUNKING API CALL DETAILS:`);
-        console.log('----------------------------------------');
-        console.log(`Model: ${getModelForOperation('chunk')}`);
-        console.log(`Max chunk length: ${maxChunkLength}`);
-        console.log(`Is incomplete: ${isIncomplete}`);
-        console.log(`Text length: ${finalCleanedText.length} chars`);
-        
-        // More detailed logging for the start/end of text
-        debugLogText("TEXT BEGINNING", finalCleanedText.substring(0, 50), false);
-        debugLogText("TEXT ENDING", finalCleanedText.substring(finalCleanedText.length - 50), false);
-        
-        // Log whether the remainderText is included at the beginning
-        if (remainderText.length > 0) {
-            const firstFewCharsOfRemainder = remainderText.substring(0, Math.min(20, remainderText.length));
-            const textIncludesRemainder = finalCleanedText.startsWith(firstFewCharsOfRemainder);
-            console.log(`VERIFICATION - Text includes remainder: ${textIncludesRemainder ? 'YES' : 'NO'}`);
-            
-            if (!textIncludesRemainder) {
-                console.warn(`WARNING: The text being sent for chunking may not include the remainder!`);
-                console.log(`Debugging info:`);
-                console.log(`- First chars of remainder: "${firstFewCharsOfRemainder}"`);
-                console.log(`- First chars of final text: "${finalCleanedText.substring(0, Math.min(20, finalCleanedText.length))}"`);
-                
-                // Add hex representation for debugging invisible characters
-                const remainderHex = Array.from(firstFewCharsOfRemainder)
-                    .map(char => char.charCodeAt(0).toString(16).padStart(2, '0'))
-                    .join(' ');
-                const finalTextHex = Array.from(finalCleanedText.substring(0, Math.min(20, finalCleanedText.length)))
-                    .map(char => char.charCodeAt(0).toString(16).padStart(2, '0'))
-                    .join(' ');
-                
-                console.log(`- Remainder hex: ${remainderHex}`);
-                console.log(`- Final text hex: ${finalTextHex}`);
-                console.log(`- Remainder length: ${remainderText.length}`);
-                console.log(`- Final text length: ${finalCleanedText.length}`);
-                console.log(`- Remainder == start of finalCleanedText: ${remainderText === finalCleanedText.substring(0, remainderText.length)}`);
-            }
-        } else {
-            console.log(`VERIFICATION - No remainder to include`);
-        }
-        console.log('----------------------------------------');
-        
-        // Get semantic chunks from LLM
+
         const chunkResponse = await openai.chat.completions.create(
             createApiOptions(getModelForOperation('chunk'), messages)
         );

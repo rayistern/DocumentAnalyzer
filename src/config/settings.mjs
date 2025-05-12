@@ -82,7 +82,7 @@ export const OPENAI_PROMPTS = {
             role: "user",
             content: `Please chunk this text by *meaning*.
                 ${isIncomplete ? '- The text will likely spill over past the end of the piece provided to you now. Rather than chunking all the way to the end of this piece, we will save the end of this current piece to prepend to the next piece we will provide you with. We will call that the "Remainder". Therefore, if it seems like the document is cut off at the end, leave the end of the document "unchunked" and specify in the json: "remainder": true' : 'The text will probablyh not spill over to the next page, but if it does, then leave the end of the document "unchunked", and indicate in the json: "remainder": true. If not, then make sure your chunks reach to the end of the document.'}
-                - If the entire text is one single theme, return one single chunk
+                - If the entire text is one single theme, you can return one single chunk
 
                 Return a valid JSON in the following exact format (no preface):
                 {
@@ -92,6 +92,12 @@ export const OPENAI_PROMPTS = {
                             "endIndex": 23,
                             "firstWords": "The quick brown fox",
                             "lastWords": "the lazy dog."
+                        }
+                        {
+                            "startIndex": 24,
+                            "endIndex": 55,
+                            "firstWords": "And then we begin our",
+                            "lastWords": "what he ate for lunch."
                         }
                     ],
                     "remainder": false
