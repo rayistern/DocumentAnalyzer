@@ -521,7 +521,11 @@ export function removeMarkdownFormatting(text) {
 }
 
 async function createChunks(text, maxChunkLength, filepath) {
-    const chunkPrompt = OPENAI_PROMPTS.chunk.content(maxChunkLength);
+    const boundaryStyle = process.env.CHUNK_BOUNDARY_STYLE || 'indices';
+    const chunkPrompt =
+        boundaryStyle === 'text'
+          ? OPENAI_PROMPTS.chunkText.content(maxChunkLength)
+          : OPENAI_PROMPTS.chunk.content(maxChunkLength);
     const combinedPrompt = `${chunkPrompt}\n\n---\n\n${text}`;
 
     const response = await openai.chat.completions.create(
@@ -538,6 +542,30 @@ async function createChunks(text, maxChunkLength, filepath) {
     const cleanResponse = removeMarkdownFormatting(response.choices[0].message.content);
     // text parameter passed here must match exactly what was sent to LLM for indices to align
     const result = parseJsonResponse(cleanResponse, text, 'chunk');
+
+    if (boundaryStyle === 'text' && result.chunks) {
+        // 1) locate all start snippets first (guaranteed unique after cursor)
+        const starts = [];
+        let cursor = 0;
+        result.chunks.forEach(({ startSnippet }) => {
+            const idx = text.indexOf(startSnippet, cursor);
+            if (idx === -1) throw new Error(`startSnippet not found: ${startSnippet}`);
+            starts.push(idx);
+            cursor = idx + 1;
+        });
+
+        // 2) compute end indices with bounded lastIndexOf
+        result.chunks = result.chunks.map(({ endSnippet }, i) => {
+            const searchLimit = i + 1 < starts.length ? starts[i + 1] - 1 : text.length;
+            const endIdxRaw   = text.lastIndexOf(endSnippet, searchLimit);
+            if (endIdxRaw === -1 || endIdxRaw < starts[i])
+                throw new Error(`endSnippet not found/behind start for chunk ${i + 1}`);
+            return {
+                startIndex: starts[i],
+                endIndex  : endIdxRaw + endSnippet.length - 1
+            };
+        });
+    }
 
     if (result.chunks && result.textToRemove) {
         result.chunks = result.chunks.map(chunk => {
@@ -1292,8 +1320,12 @@ async function cleanAndChunkDocument(
          */
         console.log('Sending text for semantic chunking...');
 
-        const chunkPrompt = OPENAI_PROMPTS.cleanAndChunk.chunk(maxChunkLength, isIncomplete).content;
-        const combinedPrompt = `${chunkPrompt}\n\n---\n\n${finalCleanedText}`;
+        const boundaryStyle = process.env.CHUNK_BOUNDARY_STYLE || 'indices';
+        const chunkPromptStr =
+            boundaryStyle === 'text'
+              ? OPENAI_PROMPTS.chunkText.content(maxChunkLength, /* isIncomplete */ false)
+              : OPENAI_PROMPTS.cleanAndChunk.chunk(maxChunkLength, isIncomplete).content;
+        const combinedPrompt = `${chunkPromptStr}\n\n---\n\n${finalCleanedText}`;
 
         const messages = [
             {
@@ -1328,7 +1360,11 @@ async function cleanAndChunkDocument(
         
         let parsedResponse;
         try {
-            parsedResponse = parseJsonResponse(removeMarkdownFormatting(rawChunkResponse), finalCleanedText, 'chunk');
+            parsedResponse = parseJsonResponse(
+                removeMarkdownFormatting(rawChunkResponse),
+                finalCleanedText,
+                'chunk'
+            );
             // Ensure parsedResponse always has chunks array
             if (!parsedResponse.chunks) {
                 parsedResponse.chunks = [];

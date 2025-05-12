@@ -214,7 +214,23 @@ Example output:
     ]
 }
 `
-    })
+    }),
+    chunkText: {
+        content: (max, isIncomplete = false) => `
+Here is a Hebrew document. Please chunk this text by *meaning* (≤${max} chars each).
+${isIncomplete
+  ? '- The text will likely spill over; leave the tail un-chunked and set "remainder": true.'
+  : '- If the text seems complete, ensure chunks reach the end and set "remainder": false.'}
+- If the entire text is one theme you may return a single chunk.
+
+Return *only* this JSON (no preface):
+{
+  "chunks": [
+    { "startSnippet":"The quick brown fox", "endSnippet":"the lazy dog." }
+  ],
+  "remainder": false
+}`
+    },
 };
 
 export default {

@@ -29,6 +29,9 @@ program
     .option('--log-prompts', 'print full LLM prompt messages', false);
 
 program
+    .option('--boundary-style <mode>', 'chunk boundary style (indices|text)', 'indices');
+
+program
     .command('process')
     .description('Process a text file through OpenAI API')
     .argument('<filepath>', 'path to the text file')
@@ -361,6 +364,7 @@ program
 program.parse();
 const globalOpts = program.opts();
 if (globalOpts.logPrompts) process.env.LOG_PROMPTS = 'true';
+process.env.CHUNK_BOUNDARY_STYLE = globalOpts.boundaryStyle;
 
 // helper ─ is there another file left to *process* (not skipped)?
 async function hasFutureProcessable(files, startIdx, opts) {
