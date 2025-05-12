@@ -361,10 +361,13 @@ program
         }
     });
 
-program.parse();
-const globalOpts = program.opts();
-if (globalOpts.logPrompts) process.env.LOG_PROMPTS = 'true';
-process.env.CHUNK_BOUNDARY_STYLE = globalOpts.boundaryStyle;
+program.parse(process.argv);
+const opts = program.opts();
+
+// NEW → propagate to rest of app
+if (opts.boundaryStyle) {
+  process.env.CHUNK_BOUNDARY_STYLE = opts.boundaryStyle;
+}
 
 // helper ─ is there another file left to *process* (not skipped)?
 async function hasFutureProcessable(files, startIdx, opts) {
