@@ -111,4 +111,46 @@ Refer to the [transformers.js pipelines documentation](https://xenova.github.io/
 - All previous heuristics for language or model-based pipeline selection have been removed.
 - This change makes the system more predictable and transparent for advanced users.
 
+## Deduplication and Upsert Logic
+
+- The `embeddings` table has a **composite unique index** on:
+  - `source_table`
+  - `source_pk`
+  - `source_column`
+  - `group`
+  - `model`
+- The upload script uses an **upsert** with `onConflict` on these columns.
+- **On conflict** (i.e., if a row with the same values exists), the row is **updated/replaced** with the new data.
+- If any of these fields differ, a new row is inserted.
+
+### Example
+
+If you upload an embedding for the same record, column, group, and model, it will **replace** the existing embedding.  
+If you change the group or model, a new row will be created.
+
+## Uploading Embeddings
+
+To upload all local embeddings:
+
+```powershell
+node .\src\index.mjs upload-embeddings --dir '.\embeddings' --batch-size 100
+```
+
+To upload only a specific group:
+
+```powershell
+node .\src\index.mjs upload-embeddings --dir '.\embeddings' --group mygroup
+```
+
+## FAQ
+
+**Q: What is `source_pk`?**  
+A: It is the primary key (ID) of the source record in the source table.
+
+**Q: Will uploading the same embedding twice create duplicates?**  
+A: No. The upsert will update/replace the existing row if all deduplication fields match.
+
+**Q: Can I store multiple embeddings for the same record?**  
+A: Yes, as long as they differ by group, model, or column.
+
 --- 

@@ -351,6 +351,8 @@ program
     .description('Upload local embeddings to Supabase')
     .option('--dir <dir>', 'directory with embedding files', './embeddings')
     .option('--batch-size <size>', 'upload batch size', '20')
+    .option('--group <group>', 'only upload embeddings for this group')
+    .option('--archive', 'move each uploaded file into ./embeddings-uploaded', true)
     .action(async (options) => {
         try {
             const { uploadEmbeddings } = await import('./batch/uploadEmbeddings.mjs');

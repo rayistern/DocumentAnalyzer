@@ -295,4 +295,47 @@ node src/index.mjs local-embed \
 - You **must** specify the correct `--task` for your model.
 - There is **no longer any automatic selection** of pipeline/task based on the model name or language.
 - If `--strict` is set and the model cannot be loaded, the process will stop with an error.
-- If `--strict` is not set, the script will attempt to use a fallback model. 
+- If `--strict` is not set, the script will attempt to use a fallback model.
+
+## Uploading Local Embeddings to Supabase
+
+You can upload all local embedding files to Supabase using:
+
+```powershell
+node .\src\index.mjs upload-embeddings --dir '.\embeddings' --batch-size 100
+```
+
+### Filtering by Group
+
+To upload only embeddings for a specific group, use the `--group` flag:
+
+```powershell
+node .\src\index.mjs upload-embeddings --dir '.\embeddings' --group mygroup
+```
+
+This will only upload files whose filenames include the specified group.
+
+### Deduplication and Upsert Behavior
+
+- The upload process uses an **upsert** operation with the following conflict criteria:
+  - `source_table`
+  - `source_pk`
+  - `source_column`
+  - `group`
+  - `model`
+- If a row with the same values for all these fields already exists, the upsert will **update/replace** the existing row with the new data.
+- If any of these fields differ, a **new row** will be inserted.
+- This allows you to store multiple embeddings for the same record, as long as they differ by group, model, or column.
+
+### Example: Multiple Embeddings for the Same Record
+
+| source_table   | source_pk | source_column | group      | model                    | Result         |
+|----------------|-----------|--------------|------------|--------------------------|---------------|
+| chunk_metadata | 123       | long_summary | default    | Xenova/all-MiniLM-L6-v2  | Upsert/replace|
+| chunk_metadata | 123       | long_summary | default    | text-embedding-ada-002   | New row       |
+| chunk_metadata | 123       | long_summary | mygroup    | Xenova/all-MiniLM-L6-v2  | New row       |
+
+### Safety
+
+- You can safely re-run the upload command; only new or changed embeddings will be inserted or updated.
+- No duplicate rows will be created for the same (source_table, source_pk, source_column, group, model) combination. 
