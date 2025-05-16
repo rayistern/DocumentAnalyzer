@@ -28,3 +28,130 @@
 
 * **Problem** – Several modules referenced a global `logger` that sometimes didn’t exist yet.  
 * **Fix** – Minimal console-proxy placed in `globalThis.logger` (and local copies for standalone utilities).
+
+
+part 2
+# Changelog: Chunk Processing Enhancements
+
+This document summarizes recent changes aimed at improving the accuracy and continuity of text chunks generated during document processing.
+
+## 1. Ensuring Full End-Snippet Inclusion in `cleaned_text`
+
+**Problem:** The `cleaned_text` stored for each chunk was sometimes missing the very end of its designated `endSnippet`. This was due to a mismatch between inclusive index calculations and exclusive slicing behavior.
+
+**Solution:**
+
+*   **Slicing Adjustment:**
+    *   In `src/services/openaiService.mjs`, when `actualChunkContent` is extracted using `finalCleanedText.slice(startIdxForDb, endIdxForDb + 1)`, the `endIdxForDb` (which is inclusive) now has `+1` added to work correctly with JavaScript's `slice` method (which has an exclusive end).
+        ```javascript:src/services/openaiService.mjs
+        // existing code...
+                        const drift = (alignedEndIdx - (chunk.endIndex + cumulativeOffset));
+                        console.log(`\nPosition drift: ${drift} characters from LLM's calculation (will be applied to future chunks)`);
+                        cumulativeOffset += drift;
+                        console.log(`Positions adjusted: ${chunk.startIndex + cumulativeOffset - drift}-${chunk.endIndex + cumulativeOffset - drift} -> ${alignedStartIdx}-${alignedEndIdx}`);
+
+                        const startIdxForDb = alignedStartIdx;
+                        const endIdxForDb = alignedEndIdx; // Assuming findWordPosition for end is already inclusive or handled by appendEndSnippetIfMissing
+
+                        //  `endIdxForDb` is inclusive → add 1 for JS slice
+                        const actualChunkContent =
+                          finalCleanedText.slice(startIdxForDb, endIdxForDb + 1);
+
+                        console.log('Re-extracted text with adjusted boundaries');
+        // existing code...
+        ```
+    *   Similarly, in `src/utils/chunkingUtils.mjs` within the `extractChunkBySnippets_V2` function, the slicing logic was updated:
+        ```javascript:src/utils/chunkingUtils.mjs
+        // existing code...
+          }
+
+          // `eIdx_inclusiveEnd` is inclusive; add 1 for slice
+          const chunk = text.slice(sIdx, eIdx_inclusiveEnd + 1);
+          logger.debug(`[extractChunkBySnippets_V2] Slicing text from ${sIdx} to ${eIdx_inclusiveEnd}.`);
+        // existing code...
+        ```
+
+*   **Defensive Append (Band-Aid Fix):**
+    *   A new utility file `src/utils/chunkFixUtils.mjs` was created.
+    *   It contains the `appendEndSnippetIfMissing` function, which checks if a chunk's text already ends with its `endSnippet`. If not, it appends the snippet, ensuring it's present.
+        ```javascript:src/utils/chunkFixUtils.mjs
+        /**
+         * Ensure the chunk's cleaned text truly ends with its end-snippet.
+         *
+         * Logic:
+         * 1. If `endSnippet` is empty → return the original text.
+         * 2. Trim trailing whitespace from the chunk and leading/trailing whitespace
+         *    from the snippet.
+         * 3. If the trimmed chunk already ends with the trimmed snippet → return
+         *    original text (no change).
+         * 4. Otherwise append the snippet, inserting ONE space when needed so we
+         *    don't merge words or double-punctuate.
+         */
+        export function appendEndSnippetIfMissing(chunkText = '', endSnippet = '') {
+          if (!endSnippet) return chunkText;
+
+          const trimmedText    = chunkText.trimEnd();
+          const trimmedSnippet = endSnippet.trim();
+
+          if (trimmedText.endsWith(trimmedSnippet)) return chunkText;  // already there
+
+          const needsSpace =
+            trimmedText.length > 0 &&                   // non-empty chunk
+            !/\s$/.test(trimmedText) &&                 // chunk doesn't already end in space
+            !/^[\s.,;!?]/.test(trimmedSnippet);         // snippet doesn't start with punctuation/space
+
+          return trimmedText + (needsSpace ? ' ' : '') + trimmedSnippet;
+        }
+        ```
+    *   This helper is used in `src/services/supabaseService.mjs` within the `buildChunkRow` function, guaranteeing the `cleaned_text` sent to the database includes the `endSnippet`.
+        ```javascript:src/services/supabaseService.mjs
+        // existing code...
+        import { appendEndSnippetIfMissing } from '../utils/chunkFixUtils.mjs';
+
+        // existing code...
+        function buildChunkRow(chunk, docId) {
+          return {
+            document_id: docId,
+            start_index: chunk.startIndex,
+            end_index: chunk.endIndex,
+            chunk_index: chunk.chunkIndex ?? null,
+            title: chunk.title ?? null,
+            cleaned_text: appendEndSnippetIfMissing(
+              chunk.cleanedText ?? '',
+              chunk.endSnippet ?? ''
+            ),
+            first_word: (chunk.startSnippet || chunk.firstWord || chunk.firstWords || '').split(/\s+/)[0] ?? '',
+            last_word: (chunk.endSnippet || chunk.lastWord || chunk.lastWords || '').split(/\s+/).pop() ?? '',
+            start_snippet: chunk.startSnippet ?? null,
+            end_snippet: chunk.endSnippet ?? null,
+          };
+        }
+        // existing code...
+        ```
+
+## 2. Enforcing Contiguous Chunks (Eliminating Gaps)
+
+**Problem:** Occasionally, gaps would appear between the `endIndex` of one chunk and the `startIndex` of the next, leading to lost text.
+
+**Solution:**
+*   In `src/services/openaiService.mjs`, within the main chunk processing loop (`parsedResponse.chunks.map`), logic was added to adjust the `alignedStartIdx` of a chunk if it was not contiguous with the `previousAdjustedEnd` index.
+    ```javascript:src/services/openaiService.mjs
+    // existing code...
+                        previousAdjustedEnd // Pass the end of the previous chunk
+                    );
+
+                    // --- BEGIN MODIFICATION: Enforce contiguous chunks ---
+                    if (index > 0 && alignedStartIdx > previousAdjustedEnd + 1) {
+                        const oldAlignedStartIdx = alignedStartIdx;
+                        alignedStartIdx = previousAdjustedEnd + 1;
+                        logger.warn(`[CONTIGUOUS_CHUNK_FIX] Chunk ${index + 1} start index adjusted to be contiguous. Was: ${oldAlignedStartIdx}, Now: ${alignedStartIdx}. Previous chunk ended at: ${previousAdjustedEnd}`);
+                    }
+                    // --- END MODIFICATION ---
+
+                    let alignedEndIdx = findWordPosition(
+    // existing code...
+    ```
+*   This ensures that if `findWordPosition` (or the LLM) suggests a `startIndex` that creates a gap after the previous chunk, the `startIndex` is forcibly set to `previousAdjustedEnd + 1`.
+*   The `previousAdjustedEnd` variable correctly tracks the end of the last processed chunk.
+
+These changes collectively improve the robustness of the chunking process, leading to more accurate text extraction and data integrity.

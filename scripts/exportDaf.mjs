@@ -186,8 +186,7 @@ function buildColumns(rows) {
   const main = [];
   const inner = [];
   const outer = [];
-  const extraOuter = []; // New column array
-  
+
   for (const r of rows) {
     const m = r.chunk_metadata?.[0];
 
@@ -195,9 +194,9 @@ function buildColumns(rows) {
     const cleanedText = convertMarkdown(esc(r.cleaned_text).replace(/[\r\n]+/g, ' '));
     
     // Reduce spacing to approximately one line
-    main.push(`<div dir="ltr" style="margin-bottom: 1em; padding-bottom: 0.5em;">${cleanedText}</div>`);
+    main.push(`<div style="margin-bottom: 1em; padding-bottom: 0.5em;">${cleanedText}</div>`);
     
-    // Process inner column content
+    // Process inner column content with forced LTR
     let innerContent = '';
     if (m) {
       // Start with the title
@@ -253,52 +252,34 @@ function buildColumns(rows) {
         sections.push(qaContent);
       }
       
-      innerContent = `<div dir="ltr" style="margin-bottom: 1em; word-wrap: break-word; overflow-wrap: break-word; width: 100%;">
+      innerContent = `<div style="margin-bottom: 1em; word-wrap: break-word; overflow-wrap: break-word; width: 100%; direction: ltr;">
         <strong>${title}</strong>
         ${sections.join('')}
       </div>`;
     } else {
-      innerContent = '<div dir="ltr" style="margin-bottom: 1em;"><em>no metadata yet</em></div>';
+      innerContent = '<div style="margin-bottom: 1em; direction: ltr;"><em>no metadata yet</em></div>';
     }
     inner.push(innerContent);
     
-    // Process outer column content with markdown - SHORT SUMMARY FIRST, no headers or margins
+    // Process outer column content with markdown - SHORT SUMMARY FIRST, no headers or margins, forced LTR
     if (m) {
       const longSummary = convertMarkdown(esc(m.long_summary || '').replace(/[\r\n]+/g, ' '));
       const shortSummary = convertMarkdown(esc(m.short_summary || '').replace(/[\r\n]+/g, ' '));
       
       // No margin between short and long summaries
-      outer.push(`<div dir="ltr" style="margin-bottom: 1em;">
+      outer.push(`<div style="margin-bottom: 1em; direction: ltr;">
         <div>${shortSummary}</div>
         <div>${longSummary}</div>
       </div>`);
-      
-      // Extra outer column content - Example with tags and potential typos
-      let extraContent = '';
-      if (m.tags_he && m.tags_he.length > 0) {
-        extraContent += `<div style="margin-bottom: 0.5em;"><strong>Tags:</strong> ${m.tags_he.join(', ')}</div>`;
-      }
-      
-      if (m.potential_typos && m.potential_typos.length > 0) {
-        extraContent += `<div><strong>Potential Typos:</strong>
-          <ul style="margin-top: 0.2em; margin-bottom: 0.2em;">
-            ${m.potential_typos.map(typo => `<li>${esc(typo)}</li>`).join('')}
-          </ul>
-        </div>`;
-      }
-      
-      extraOuter.push(`<div dir="ltr" style="margin-bottom: 1em;">${extraContent || '<em>no extra data</em>'}</div>`);
     } else {
-      outer.push('<div dir="ltr" style="margin-bottom: 1em;"></div>');
-      extraOuter.push('<div dir="ltr" style="margin-bottom: 1em;"></div>');
+      outer.push('<div style="margin-bottom: 1em; direction: ltr;"></div>');
     }
   }
 
   return {
     mainHTML: main.join(''),
     innerHTML: inner.join(''),
-    outerHTML: outer.join(''),
-    extraOuterHTML: extraOuter.join('') // Return new column
+    outerHTML: outer.join('')
   };
 }
 // ╰─────────────────────────────────────────────────────────────────────────╯
@@ -306,7 +287,7 @@ function buildColumns(rows) {
 
 // ╭─────────────────────────────────────────────────────────────────────────╮
 // │ 5. Wrap everything in a self-contained HTML page with system fonts      │
-function buildHtml({ mainHTML = '', innerHTML = '', outerHTML = '', extraOuterHTML = '' } = {}) {
+function buildHtml({ mainHTML = '', innerHTML = '', outerHTML = '' } = {}) {
   const DAF_JS = 'https://unpkg.com/daf-renderer@latest/dist/daf-renderer.min.js';
   
   return `<!DOCTYPE html>
@@ -338,23 +319,11 @@ function buildHtml({ mainHTML = '', innerHTML = '', outerHTML = '', extraOuterHT
     .amud-inner > div, .amud-outer > div {
       margin-bottom: 2em !important;
     }
-    .container {
-      display: grid;
-      grid-template-columns: 3fr 1fr 1fr 1fr; /* 4 columns now */
-      gap: 20px;
-    }
   </style>
   <script src="${DAF_JS}"></script>
 </head>
 <body>
-  <div id="daf">
-    <div class="container">
-      <div class="main-col">${mainHTML}</div>
-      <div class="inner-col">${innerHTML}</div>
-      <div class="outer-col">${outerHTML}</div>
-      <div class="extra-outer-col">${extraOuterHTML}</div>
-    </div>
-  </div>
+  <div id="daf"></div>
 
   <script>
     (function init() {
@@ -378,7 +347,6 @@ function buildHtml({ mainHTML = '', innerHTML = '', outerHTML = '', extraOuterHT
         \`${mainHTML.replace(/`/g,'\\`')}\`,
         \`${innerHTML.replace(/`/g,'\\`')}\`,
         \`${outerHTML.replace(/`/g,'\\`')}\`,
-        \`${extraOuterHTML.replace(/`/g,'\\`')}\`,
         "b"
       );
     })();
@@ -402,8 +370,8 @@ function buildHtml({ mainHTML = '', innerHTML = '', outerHTML = '', extraOuterHT
       process.exit(1);
     }
 
-    const { mainHTML, innerHTML, outerHTML, extraOuterHTML } = buildColumns(rows);
-    const html    = buildHtml({ mainHTML, innerHTML, outerHTML, extraOuterHTML });
+    const columns = buildColumns(rows);   // <- returns {mainHTML, …}
+    const html    = buildHtml(columns);   // <- pass the whole object
     await writeFile(out, html, 'utf8');
     console.log(`🎉  Wrote ${path.resolve(out)}`);
   } catch (error) {
