@@ -187,16 +187,27 @@ function buildColumns(rows) {
   const inner = [];
   const outer = [];
 
+  // Flag to track if we've processed the first chunk
+  let isFirstChunk = true;
+
   for (const r of rows) {
     const m = r.chunk_metadata?.[0];
 
     // Clean out all line breaks from the text and handle markdown formatting
     const cleanedText = convertMarkdown(esc(r.cleaned_text).replace(/[\r\n]+/g, ' '));
     
-    // Reduce spacing to approximately one line
-    main.push(`<div style="margin-bottom: 1em; padding-bottom: 0.5em;">${cleanedText}</div>`);
+    // For the first chunk, make the first word 2x larger
+    let displayText = cleanedText;
+    if (isFirstChunk) {
+      // Find the first word and wrap it in a span with larger font
+      displayText = cleanedText.replace(/^(\S+)/, '<span style="font-size: 1.7em;">$1</span>');
+      isFirstChunk = false;
+    }
     
-    // Process inner column content with forced LTR
+    // Reduce spacing to approximately one line and force LTR for left column
+    main.push(`<div dir="ltr" style="margin-bottom: 1em; padding-bottom: 0.5em;">${displayText}</div>`);
+    
+    // Process inner column content
     let innerContent = '';
     if (m) {
       // Start with the title
@@ -261,18 +272,20 @@ function buildColumns(rows) {
     }
     inner.push(innerContent);
     
-    // Process outer column content with markdown - SHORT SUMMARY FIRST, no headers or margins, forced LTR
+    // Process outer column content with markdown - SHORT SUMMARY FIRST, no headers or margins, and force LTR
     if (m) {
+      const generatedTitle = m.generated_title ? `<div><strong>${esc(m.generated_title)}</strong></div>` : '';
       const longSummary = convertMarkdown(esc(m.long_summary || '').replace(/[\r\n]+/g, ' '));
       const shortSummary = convertMarkdown(esc(m.short_summary || '').replace(/[\r\n]+/g, ' '));
       
-      // No margin between short and long summaries
-      outer.push(`<div style="margin-bottom: 1em; direction: ltr;">
+      // Title in bold, then short summary, then long summary
+      outer.push(`<div dir="ltr" style="margin-bottom: 1em;">
+        ${generatedTitle}
         <div>${shortSummary}</div>
         <div>${longSummary}</div>
       </div>`);
     } else {
-      outer.push('<div style="margin-bottom: 1em; direction: ltr;"></div>');
+      outer.push('<div dir="ltr" style="margin-bottom: 1em;"></div>');
     }
   }
 
