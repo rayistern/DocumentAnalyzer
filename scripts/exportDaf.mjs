@@ -175,18 +175,19 @@ function buildColumns(rows) {
 
   for (const r of rows) {
     const m = r.chunk_metadata?.[0];            // ← graceful when NULL
-    main.push(esc(r.cleaned_text));
+    // Wrap each chunk in a div with spacing but transparent border
+    main.push(`<div style="margin-bottom: 2em; padding-bottom: 1em;">${esc(r.cleaned_text)}</div>`);
     inner.push(m
-      ? `<strong>${esc(m.generated_title || '')}</strong>` +
+      ? `<div style="margin-bottom: 2em;"><strong>${esc(m.generated_title || '')}</strong>` +
         list(m.quiz_questions) +
         list(m.followup_thinking_questions) +
         (m.qa_pair
-          ? `<details><summary>Q & A</summary><pre>${esc(m.qa_pair)}</pre></details>`
-          : '')
-      : '<em>no metadata yet</em>');
+          ? `<details><summary>Q & A</summary><pre>${esc(m.qa_pair)}</pre></details></div>`
+          : '</div>')
+      : '<div style="margin-bottom: 2em;"><em>no metadata yet</em></div>');
     outer.push(m
-      ? `${esc(m.long_summary || '')}<hr>${esc(m.short_summary || '')}`
-      : '');
+      ? `<div style="margin-bottom: 2em;">${esc(m.long_summary || '')}<hr>${esc(m.short_summary || '')}</div>`
+      : '<div style="margin-bottom: 2em;"></div>');
   }
 
   return {
@@ -223,6 +224,15 @@ function buildHtml({ mainHTML = '', innerHTML = '', outerHTML = '' } = {}) {
     [lang="en"], .commentary {
       font-family: "Arial", "Helvetica", sans-serif;
     }
+    
+    /* Override renderer styles with !important */
+    .amud-main > div {
+      margin-bottom: 2em !important;
+      padding-bottom: 1em !important;
+    }
+    .amud-inner > div, .amud-outer > div {
+      margin-bottom: 2em !important;
+    }
   </style>
   <script src="${DAF_JS}"></script>
 </head>
@@ -239,6 +249,11 @@ function buildHtml({ mainHTML = '', innerHTML = '', outerHTML = '' } = {}) {
           main: "Times New Roman, serif", 
           inner: "Arial, Helvetica, sans-serif", 
           outer: "Arial, Helvetica, sans-serif" 
+        },
+        // Add spacing parameters if the renderer supports them
+        spacing: {
+          sectionMargin: "2em",
+          paragraphMargin: "1.5em"
         }
       });
 
