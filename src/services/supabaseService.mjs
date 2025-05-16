@@ -538,7 +538,15 @@ export async function saveCleanedDocument(documentId, cleanedText, originalText,
     }
 }
 
-export async function saveChunkMetadata(documentId, chunkIndex, metadata, modelUsed = null, rawLLMResponse = null, apiMetadata = null) {
+export async function saveChunkMetadata(
+  documentId,
+  chunkIndex,
+  metadata,
+  chunkId        // ← NEW param
+  , modelUsed    = null,
+  rawLLMResponse = null,
+  apiMetadata    = null
+) {
     try {
         console.log(`Saving metadata for document ${documentId}, chunk ${chunkIndex}...`);
         
@@ -683,6 +691,7 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata, modelU
         
         // Convert arrays to Postgres format
         const formattedMetadata = {
+            chunk_id: chunkId,          // ★ new field
             document_id: documentId,
             chunk_index: chunkIndex,
             long_summary: mappedMetadata.long_summary,
@@ -739,14 +748,22 @@ export async function saveChunkMetadata(documentId, chunkIndex, metadata, modelU
             });
         }
 
-        const { error } = await supabase
-            .from('chunk_metadata')
-            .insert(formattedMetadata);
+        // If caller did not provide it, look it up once:
+        if (!chunkId) {
+            const { data, error } = await supabase
+                .from('chunks')
+                .select('id')
+                .eq('document_id', documentId)
+                .eq('chunk_index', chunkIndex)
+                .maybeSingle();
 
-        if (error) {
-            console.error('Error saving chunk metadata:', error);
-            throw new Error(`Supabase metadata error: ${error.message}`);
+            if (error) throw error;
+            chunkId = data?.id;
         }
+
+        formattedMetadata.chunk_id = chunkId;          // ★ new field
+
+        await supabase.from('chunk_metadata').upsert(formattedMetadata);
 
         console.log(`Successfully saved metadata for chunk ${chunkIndex}`);
     } catch (error) {

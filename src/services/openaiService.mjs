@@ -8,6 +8,8 @@ import { supabase } from './supabaseService.mjs';
 import { retryWithFallback, validateGap } from './errorHandlingService.mjs';
 import { parseJsonResponse } from '../utils/jsonUtils.mjs';
 import { setupProcessTimeout } from '../config.mjs';
+import { extractChunkBySnippets_V2 } from '../utils/chunkingUtils.mjs'; // NEW
+import crypto from 'crypto';
 
 dotenv.config()
 

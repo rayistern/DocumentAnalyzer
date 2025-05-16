@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, timestamp, varchar } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, timestamp, varchar, uuid } from "drizzle-orm/pg-core";
 import { setupProcessTimeout } from './config.mjs';
 
 // Define tables
@@ -23,6 +23,14 @@ const chunks = pgTable('chunks', {
   lastWord: varchar('last_word', { length: 255 }).notNull(),
   content: text('content').notNull(),
   createdAt: timestamp('created_at').defaultNow()
+});
+
+const chunkMetadata = pgTable('chunk_metadata', {
+  id: serial('id').primaryKey(),
+  documentId: uuid('document_id').references(() => documents.id),
+  chunkId:    uuid('chunk_id').notNull().references(() => chunks.id),
+  chunkIndex: integer('chunk_index'),
+  /* …other fields… */
 });
 
 // Export as ES modules
