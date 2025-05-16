@@ -1,6 +1,18 @@
 import { setupProcessTimeout } from '../config.mjs';
 import { z } from 'zod';
 
+/* ======================================================================
+ *  Fallback logger – guarantees `logger` is always defined inside this
+ *  module (parseJsonResponse, etc.).  If you already have a global logger
+ *  it will be used; otherwise we silently proxy to console.
+ * ====================================================================*/
+const logger = globalThis.logger ?? {
+  debug : (...a) => console.debug('[debug ]', ...a),
+  info  : (...a) => console.info ('[info  ]', ...a),
+  warn  : (...a) => console.warn ('[warn  ]', ...a),
+  error : (...a) => console.error('[error ]', ...a),
+};
+
 // Define schemas for validation
 /**
  * Zod schema for chunk objects within the response
@@ -738,6 +750,7 @@ export function parseJsonResponse(jsonResponseText, cleanedText = null, schemaTy
         console.log("[HEBREW-HANDLING] JSON parsing succeeded but Zod validation failed. Using parsed data anyway.");
         return fixedParsed;
     } catch (error) {
+        logger.error(`[jsonUtils] Failed to parse JSON for type '${schemaType}'. Error: ${error.message}. Raw string (first 500 chars): ${jsonResponseText.substring(0,500)}`);
         console.log("[HEBREW-HANDLING] Standard JSON parsing failed:", error.message);
     }
     

@@ -257,6 +257,6 @@ export default {
     rateLimitMs: Number(process.env.EMBED_DELAY || 1000),
   },
   fields: JSON.parse(process.env.EMBED_FIELDS || '[]'), // [{table,column,filter?}]
-  logging: { level: process.env.LOG_LEVEL || 'debug' },
+  logging: { level: process.env.LOG_LEVEL || 'info' },
   // ...
 }

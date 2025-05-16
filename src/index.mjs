@@ -1,5 +1,13 @@
 #!/usr/bin/env node
 
+// Add this at the very TOP of src/index.mjs, before ANY imports
+globalThis.logger = globalThis.logger || {
+  debug: (...args) => console.debug('[DEBUG]', ...args),
+  info: (...args) => console.info('[INFO]', ...args),
+  warn: (...args) => console.warn('[WARN]', ...args),
+  error: (...args) => console.error('[ERROR]', ...args)
+};
+
 import { Command } from 'commander';
 import dotenv from 'dotenv';
 import { processFile, batchProcessFullMetadata } from './services/openaiService.mjs';

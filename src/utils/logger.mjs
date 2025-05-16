@@ -1,4 +1,7 @@
 import pino from 'pino';
 import settings from '../config/settings.mjs';
 
-export default pino({ level: settings.logging.level }); 
+const logger = pino({ level: settings.logging.level });
+
+export default logger;
+export { logger }; 

@@ -1145,20 +1145,15 @@ async function cleanAndChunkDocument(
             cleanResult = parseJsonResponse(cleanResponse.choices[0].message.content, 'textRemoval');
         } catch (parseError) {
             console.warn('Failed to parse LLM response as JSON, storing raw response:', parseError.message);
-            // Store the raw response and continue
             const { error: rawError } = await supabase
                 .from('documents')
-                .update({ 
+                .update({
                     raw_llm_response: cleanResponse.choices[0].message.content,
-                    status: 'parse_error',
-                    error_message: parseError.message,
-                    updated_at: new Date().toISOString()
+                    status          : 'parse_error',
+                    error_message   : parseError.message,
+                    updated_at      : new Date().toISOString()
                 })
                 .eq('id', document.id);
-            
-            if (rawError) {
-                console.error('Error storing raw response:', rawError);
-            }
             // Return empty result to continue processing
             cleanResult = { textToRemove: [] };
         }
@@ -1385,24 +1380,72 @@ async function cleanAndChunkDocument(
                 console.log(`========== END FULL RAW RESPONSE ==========\n`);
                 
                 // Extract text for all chunks
-                for (const chunk of parsedResponse.chunks) {
-                    let finalStartIndex = chunk.startIndex;
-                    let finalEndIndex = chunk.endIndex;
+                for (const rawChunk of parsedResponse.chunks) {
+                  const { title, startSnippet, endSnippet, startIndex, endIndex } = rawChunk;
+                  let actualChunkContent = null;
+                  let sIdxForDb = -1;
+                  let eIdxForDb = -1;
 
-                    // If snippet-based, trust indices and snippets
-                    if (
-                        process.env.CHUNK_BOUNDARY_STYLE === 'text' &&
-                        chunk.startSnippet && chunk.endSnippet
-                    ) {
-                        // No further adjustment!
-                        chunk.cleanedText = finalCleanedText.slice(finalStartIndex, finalEndIndex + 1);
-                        chunk.firstWord = chunk.startSnippet.split(/\s+/)[0];
-                        chunk.lastWord = chunk.endSnippet.split(/\s+/).pop();
-                        // Already set: chunk.startSnippet, chunk.endSnippet
+                  logger.debug(`[openaiService] Processing LLM chunk for "${title}":`);
+                  logger.debug(`  ┣━ LLM raw instruction: startIndex=${startIndex}, endIndex=${endIndex}`);
+                  logger.debug(`  ┣━ LLM startSnippet: "${startSnippet?.replace(/\n/g, '\\n')}"`);
+                  logger.debug(`  ┗━ LLM endSnippet: "${endSnippet?.replace(/\n/g, '\\n')}"`);
+
+                  // Sanity check: Log the base text again, right before using it for snippet extraction
+                  logger.debug(`  Base text for snippet extraction (len ${finalCleanedText?.length}): "${finalCleanedText?.substring(0, 100).replace(/\n/g, '\\n')}..."`);
+
+                  if (typeof startIndex === 'number' && typeof endIndex === 'number' && startIndex < endIndex && endIndex <= finalCleanedText.length) {
+                    logger.info(`[openaiService] Chunk "${title}": Using INDEX-BASED strategy (LLM indices: ${startIndex}-${endIndex}).`);
+                    actualChunkContent = finalCleanedText.slice(startIndex, endIndex);
+                    sIdxForDb = startIndex;
+                    eIdxForDb = endIndex;
+                    logger.debug(`  Index-based slice (len ${actualChunkContent?.length}): "${actualChunkContent?.substring(0,100).replace(/\n/g, '\\n')}..."`);
+                  } else if (startSnippet) {
+                    logger.info(`[openaiService] Chunk "${title}": Using SNIPPET-BASED strategy.`);
+                    actualChunkContent = extractChunkBySnippets_V2({
+                      text: finalCleanedText, // Crucial: This must be the full text the snippets refer to
+                      startSnippet: startSnippet,
+                      endSnippet: endSnippet,
+                    });
+
+                    if (actualChunkContent && actualChunkContent.length > 0) {
+                      // Now, find this extracted content within the original finalCleanedText to get DB indices
+                      sIdxForDb = finalCleanedText.indexOf(actualChunkContent);
+                      if (sIdxForDb !== -1) {
+                        eIdxForDb = sIdxForDb + actualChunkContent.length;
+                        logger.debug(`[openaiService] Snippet strategy for "${title}" SUCCESS.`);
+                        logger.debug(`  ┣━ Derived DB indices: ${sIdxForDb}-${eIdxForDb}.`);
+                        logger.debug(`  ┣━ Actual chunk content len: ${actualChunkContent.length}`);
+                        logger.debug(`  ┗━ Content: "${actualChunkContent.substring(0, 200).replace(/\n/g, '\\n')}..."`);
+                        if (actualChunkContent.length > 200) logger.debug(`    ... (content continues) ... "${actualChunkContent.substring(actualChunkContent.length - 200).replace(/\n/g, '\\n')}"`);
+                      } else {
+                        logger.error(`[openaiService] CRITICAL for "${title}": Snippet-extracted chunk NOT FOUND in base finalCleanedText. This is unexpected and indicates a mismatch.`);
+                        logger.error(`  ┣━ Snippet-extracted chunk (len ${actualChunkContent?.length}): "${actualChunkContent?.substring(0, 200).replace(/\n/g, '\\n')}..."`);
+                        logger.error(`  ┗━ Base finalCleanedText started with: "${finalCleanedText?.substring(0, Math.min(250, actualChunkContent?.length || 250)).replace(/\n/g, '\\n')}..."`);
+                        actualChunkContent = null; // Mark as failed to prevent saving bad data
+                      }
                     } else {
-                        // ...existing logic for index-based chunking...
+                      logger.warn(`[openaiService] Snippet strategy for "${title}" FAILED: extractChunkBySnippets_V2 returned null or empty string.`);
+                      actualChunkContent = null;
                     }
-                    // ...push chunk to output, etc...
+                  } else {
+                    logger.warn(`[openaiService] Chunk "${title}": No usable indices or startSnippet provided by LLM. Skipping chunk.`);
+                    actualChunkContent = null;
+                  }
+
+                  if (actualChunkContent && sIdxForDb !== -1 && eIdxForDb !== -1) {
+                    // Add to a list for DB, e.g.:
+                    // finalChunksForDb.push({
+                    //   title: title,
+                    //   cleanedText: actualChunkContent,
+                    //   startIndex: sIdxForDb,
+                    //   endIndex: eIdxForDb,
+                    //   // ... other rawChunk fields like firstWord, lastWord ...
+                    // });
+                    logger.info(`[openaiService] Chunk "${title}" processed successfully. Length: ${actualChunkContent.length}, Indices: ${sIdxForDb}-${eIdxForDb}`);
+                  } else {
+                    logger.warn(`[openaiService] Chunk "${title}" could not be processed or resulted in empty content.`);
+                  }
                 }
             }
         } catch (parseError) {
@@ -1410,11 +1453,10 @@ async function cleanAndChunkDocument(
             // Store the raw response and continue
             const { error: rawError } = await supabase
                 .from('documents')
-                .update({ 
-                    raw_chunk_response: chunkResponse.choices[0].message.content,
-                    status: 'chunk_parse_error',
-                    error_message: parseError.message,
-                    updated_at: new Date().toISOString()
+                .update({
+                    raw_llm_response: chunkResponse.choices[0].message.content,
+                    error_message   : parseError.message,
+                    updated_at      : new Date().toISOString()
                 })
                 .eq('id', document.id);
             
