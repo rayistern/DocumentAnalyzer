@@ -10,6 +10,8 @@ import { parseJsonResponse } from '../utils/jsonUtils.mjs';
 import { setupProcessTimeout } from '../config.mjs';
 import { extractChunkBySnippets_V2 } from '../utils/chunkingUtils.mjs'; // NEW
 import crypto from 'crypto';
+import { appendEndSnippetIfMissing } from '../utils/chunkFixUtils.mjs'
+import { shiftStartIndexByPrevSnippet } from '../utils/chunkFixUtils.mjs'
 
 dotenv.config()
 
@@ -1471,6 +1473,7 @@ async function cleanAndChunkDocument(
              */
             let cumulativeOffset = 0;  // Resets for each prechunk's LLM call
             let previousAdjustedEnd = 0;  // Tracks last chunk's end position
+            let previousEndSnippetTxt = ''; // for start-shift fix
             
             parsedResponse.chunks = parsedResponse.chunks.map((chunk, index) => {
                 console.log(`\nChunk ${index + 1}:`);
@@ -1491,13 +1494,26 @@ async function cleanAndChunkDocument(
                     previousAdjustedEnd // Pass the end of the previous chunk
                 );
 
-                // --- BEGIN MODIFICATION: Enforce contiguous chunks ---
+                // --- 1️⃣  keep chunks contiguous (old logic) ----------
                 if (index > 0 && alignedStartIdx > previousAdjustedEnd + 1) {
                     const oldAlignedStartIdx = alignedStartIdx;
                     alignedStartIdx = previousAdjustedEnd + 1;
                     logger.warn(`[CONTIGUOUS_CHUNK_FIX] Chunk ${index + 1} start index adjusted to be contiguous. Was: ${oldAlignedStartIdx}, Now: ${alignedStartIdx}. Previous chunk ended at: ${previousAdjustedEnd}`);
                 }
-                // --- END MODIFICATION ---
+                // --- 2️⃣  NEW start-shift to drop overlap ------------
+                const shiftedStartIdx = shiftStartIndexByPrevSnippet(
+                  alignedStartIdx,
+                  previousEndSnippetTxt
+                );
+                if (shiftedStartIdx !== alignedStartIdx) {
+                  logger.warn(
+                    `[START_OVERLAP_FIX] Chunk ${index + 1} start moved ` +
+                    `from ${alignedStartIdx} → ${shiftedStartIdx} ` +
+                    `(prev end-snippet length ${previousEndSnippetTxt.length})`
+                  );
+                  alignedStartIdx = shiftedStartIdx;
+                }
+                // ------------------------------------------------------
 
                 let alignedEndIdx = findWordPosition(
                     finalCleanedText,
@@ -1534,6 +1550,7 @@ async function cleanAndChunkDocument(
 
                 // Update previousAdjustedEnd for the next iteration
                 previousAdjustedEnd = endIdxForDb;
+                previousEndSnippetTxt = chunk.endSnippet ?? '';
 
                 return {
                     ...chunk,

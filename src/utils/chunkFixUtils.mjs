@@ -13,15 +13,33 @@
 export function appendEndSnippetIfMissing(chunkText = '', endSnippet = '') {
   if (!endSnippet) return chunkText;
 
-  const trimmedText    = chunkText.trimEnd();
-  const trimmedSnippet = endSnippet.trim();
+  const trimmedText     = chunkText.trimEnd();
+  const trimmedSnippet  = endSnippet.trim();
+  if (trimmedText.endsWith(trimmedSnippet)) return chunkText;      // already fine
 
-  if (trimmedText.endsWith(trimmedSnippet)) return chunkText;  // already there
+  const baseText =
+    trimmedText.length > 2 ? trimmedText.slice(0, -2).trimEnd() : '';
 
   const needsSpace =
-    trimmedText.length > 0 &&                   // non-empty chunk
-    !/\s$/.test(trimmedText) &&                 // chunk doesn't already end in space
-    !/^[\s.,;!?]/.test(trimmedSnippet);         // snippet doesn't start with punctuation/space
+    baseText.length > 0 &&
+    !/\s$/.test(baseText) &&
+    !/^[\s.,;!?]/.test(trimmedSnippet);
 
-  return trimmedText + (needsSpace ? ' ' : '') + trimmedSnippet;
+  return baseText + (needsSpace ? ' ' : '') + trimmedSnippet;
+}
+
+/* ------------------------------------------------------------------ */
+/*  NEW  – start-index "band-aid"                                     */
+/* ------------------------------------------------------------------ */
+/**
+ * Shift a start-index forward to skip the previous chunk's end-snippet.
+ *
+ * startIdx    – the start index currently chosen
+ * prevSnippet – the full end-snippet of the previous chunk
+ *
+ * Returns: startIdx + (prevSnippet.length - 1)    // no shift if !prevSnippet
+ */
+export function shiftStartIndexByPrevSnippet(startIdx = 0, prevSnippet = '') {
+  if (!prevSnippet) return startIdx;
+  return startIdx + Math.max(prevSnippet.length - 1, 0);
 } 

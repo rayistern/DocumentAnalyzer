@@ -196,7 +196,7 @@ function buildColumns(rows) {
     // Reduce spacing to approximately one line
     main.push(`<div style="margin-bottom: 1em; padding-bottom: 0.5em;">${cleanedText}</div>`);
     
-    // Process inner column content with forced LTR
+    // Process inner column content
     let innerContent = '';
     if (m) {
       // Start with the title
@@ -252,32 +252,33 @@ function buildColumns(rows) {
         sections.push(qaContent);
       }
       
-      innerContent = `<div style="margin-bottom: 1em; word-wrap: break-word; overflow-wrap: break-word; width: 100%; direction: ltr;">
+      innerContent = `<div style="margin-bottom: 1em; word-wrap: break-word; overflow-wrap: break-word; width: 100%;">
         <strong>${title}</strong>
         ${sections.join('')}
       </div>`;
     } else {
-      innerContent = '<div style="margin-bottom: 1em; direction: ltr;"><em>no metadata yet</em></div>';
+      innerContent = '<div style="margin-bottom: 1em;"><em>no metadata yet</em></div>';
     }
     inner.push(innerContent);
     
-    // Process outer column content with markdown - SHORT SUMMARY FIRST, no headers or margins, forced LTR
+    // Process outer column content with markdown - SHORT SUMMARY FIRST, no headers or margins, and force LTR
     if (m) {
       const longSummary = convertMarkdown(esc(m.long_summary || '').replace(/[\r\n]+/g, ' '));
       const shortSummary = convertMarkdown(esc(m.short_summary || '').replace(/[\r\n]+/g, ' '));
       
-      // No margin between short and long summaries
-      outer.push(`<div style="margin-bottom: 1em; direction: ltr;">
+      // Force LTR for right column
+      outer.push(`<div dir="ltr" style="margin-bottom: 1em;">
         <div>${shortSummary}</div>
         <div>${longSummary}</div>
       </div>`);
     } else {
-      outer.push('<div style="margin-bottom: 1em; direction: ltr;"></div>');
+      outer.push('<div dir="ltr" style="margin-bottom: 1em;"></div>');
     }
   }
 
   return {
-    mainHTML: main.join(''),
+    // Wrap the entire main column in a dir="ltr" container
+    mainHTML: `<div dir="ltr">${main.join('')}</div>`,
     innerHTML: inner.join(''),
     outerHTML: outer.join('')
   };
