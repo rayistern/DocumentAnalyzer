@@ -157,43 +157,122 @@ function esc(value) {
     .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function list(items) {
-  // Guard against null/undefined and ensure we have an array
-  if (!items) return '';
+function list(items, applyMarkdown = false) {
+  if (!items || !items.length) return '';
+  return `<ul>${items.map(item => {
+    const content = applyMarkdown ? convertMarkdown(esc(item)) : esc(item);
+    return `<li>${content}</li>`;
+  }).join('')}</ul>`;
+}
+
+function convertMarkdown(text) {
+  if (!text) return '';
   
-  // If it's already an array, use it; otherwise convert to array
-  const arr = Array.isArray(items) ? items : [items];
-  
-  // Only build an unordered list if there are items
-  return arr.length ? `<ul>${arr.map(i=>`<li>${esc(i)}</li>`).join('')}</ul>` : '';
+  return text
+    // Bold: **text** or __text__
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/__(.*?)__/g, '<strong>$1</strong>')
+    
+    // Italic: *text* or _text_ (but not inside a word like example_word)
+    .replace(/(?<!\w)\*(?!\*)(.*?)(?<!\*)\*(?!\w)/g, '<em>$1</em>')
+    .replace(/(?<!\w)_(?!_)(.*?)(?<!_)_(?!\w)/g, '<em>$1</em>')
+    
+    // Explicitly bold "Question:" and "Answer:" patterns
+    .replace(/\bQuestion:\b/g, '<strong>Question:</strong>')
+    .replace(/\bAnswer:\b/g, '<strong>Answer:</strong>');
 }
 
 function buildColumns(rows) {
-  const main  = [];
+  const main = [];
   const inner = [];
   const outer = [];
 
   for (const r of rows) {
-    const m = r.chunk_metadata?.[0];            // ← graceful when NULL
-    // Wrap each chunk in a div with spacing but transparent border
-    main.push(`<div style="margin-bottom: 2em; padding-bottom: 1em;">${esc(r.cleaned_text)}</div>`);
-    inner.push(m
-      ? `<div style="margin-bottom: 2em;"><strong>${esc(m.generated_title || '')}</strong>` +
-        list(m.quiz_questions) +
-        list(m.followup_thinking_questions) +
-        (m.qa_pair
-          ? `<details><summary>Q & A</summary><pre>${esc(m.qa_pair)}</pre></details></div>`
-          : '</div>')
-      : '<div style="margin-bottom: 2em;"><em>no metadata yet</em></div>');
-    outer.push(m
-      ? `<div style="margin-bottom: 2em;">${esc(m.long_summary || '')}<hr>${esc(m.short_summary || '')}</div>`
-      : '<div style="margin-bottom: 2em;"></div>');
+    const m = r.chunk_metadata?.[0];
+
+    // Clean out all line breaks from the text and handle markdown formatting
+    const cleanedText = convertMarkdown(esc(r.cleaned_text).replace(/[\r\n]+/g, ' '));
+    
+    // Reduce spacing to approximately one line
+    main.push(`<div style="margin-bottom: 1em; padding-bottom: 0.5em;">${cleanedText}</div>`);
+    
+    // Process inner column content
+    let innerContent = '';
+    if (m) {
+      const title = convertMarkdown(esc(m.generated_title || '').replace(/[\r\n]+/g, ' '));
+      
+      // Format quiz questions
+      let cleanQuestions = '';
+      if (m.quiz_questions && m.quiz_questions.length) {
+        cleanQuestions = `<div style="margin-top: 0.5em;"><strong>Quiz Questions:</strong>
+          <ul style="margin-top: 0.2em; margin-bottom: 0.2em;">
+            ${m.quiz_questions.map(q => `<li>${convertMarkdown(esc(q).replace(/[\r\n]+/g, ' '))}</li>`).join('')}
+          </ul>
+        </div>`;
+      }
+      
+      // Format follow-up thinking questions with better styling
+      let cleanFollowup = '';
+      if (m.followup_thinking_questions && m.followup_thinking_questions.length) {
+        cleanFollowup = `<div style="margin-top: 0.5em;"><strong>Follow-up Questions:</strong>
+          <ul style="margin-top: 0.2em; margin-bottom: 0.2em;">
+            ${m.followup_thinking_questions.map(q => `<li>${convertMarkdown(esc(q).replace(/[\r\n]+/g, ' '))}</li>`).join('')}
+          </ul>
+        </div>`;
+      }
+      
+      // Clean QA pairs - properly handle object vs string with markdown
+      let qaContent = '';
+      if (m.qa_pair) {
+        let qaText = '';
+        if (typeof m.qa_pair === 'object') {
+          try {
+            // Extract Q and A and format them nicely with markdown
+            const qaPair = m.qa_pair;
+            const question = esc(qaPair.question || '');
+            const answer = esc(qaPair.answer || '');
+            
+            qaText = `<strong>Question:</strong> ${convertMarkdown(question)}\n\n<strong>Answer:</strong> ${convertMarkdown(answer)}`;
+          } catch (e) {
+            // Fallback to full JSON if extraction fails
+            qaText = esc(JSON.stringify(m.qa_pair, null, 2));
+          }
+        } else {
+          // Use it as is if it's already a string, but apply markdown
+          const rawText = esc(m.qa_pair);
+          // Bold "Question:" and "Answer:" patterns
+          qaText = rawText.replace(/Question:/g, '<strong>Question:</strong>')
+                          .replace(/Answer:/g, '<strong>Answer:</strong>');
+          qaText = convertMarkdown(qaText);
+        }
+        
+        // Replace line breaks with spaces to keep it inline
+        const cleanQaPair = qaText.replace(/[\r\n]+/g, ' ');
+        qaContent = `<div style="margin-top: 0.5em;">${cleanQaPair}</div>`;
+      }
+      
+      innerContent = `<div style="margin-bottom: 1em; word-wrap: break-word; overflow-wrap: break-word; width: 100%;">
+        <strong>${title}</strong>${cleanQuestions}${cleanFollowup}${qaContent}
+      </div>`;
+    } else {
+      innerContent = '<div style="margin-bottom: 1em;"><em>no metadata yet</em></div>';
+    }
+    inner.push(innerContent);
+    
+    // Process outer column content with markdown
+    if (m) {
+      const longSummary = convertMarkdown(esc(m.long_summary || '').replace(/[\r\n]+/g, ' '));
+      const shortSummary = convertMarkdown(esc(m.short_summary || '').replace(/[\r\n]+/g, ' '));
+      outer.push(`<div style="margin-bottom: 1em;">${longSummary}<hr>${shortSummary}</div>`);
+    } else {
+      outer.push('<div style="margin-bottom: 1em;"></div>');
+    }
   }
 
   return {
-    mainHTML  : main.join(''),
-    innerHTML : inner.join(''),
-    outerHTML : outer.join('')
+    mainHTML: main.join(''),
+    innerHTML: inner.join(''),
+    outerHTML: outer.join('')
   };
 }
 // ╰─────────────────────────────────────────────────────────────────────────╯
