@@ -539,68 +539,88 @@ export async function saveCleanedDocument(documentId, cleanedText, originalText,
 }
 
 /**
- * Saves metadata for a chunk
- * 
- * @param {string} documentId - The document ID
- * @param {number} chunkIndex - The index of the chunk
- * @param {object} metadata - The metadata object
- * @param {string} model - The model used to generate metadata
- * @param {string} rawResponse - The raw LLM response
- * @param {object} apiMetadata - Additional API metadata
- * @returns {Promise} - A promise that resolves when the metadata is saved
+ * Saves metadata for one chunk row.
+ * Now logs every step AND retries without unsupported columns when needed.
  */
-export async function saveChunkMetadata(documentId, chunkIndex, metadata, model, rawResponse, apiMetadata = {}) {
-    try {
-        // First find the actual chunk ID using document ID and chunk index
-        const { data: chunks, error: chunkError } = await supabase
-            .from('chunks')
-            .select('id')
-            .eq('document_id', documentId)
-            .order('id', { ascending: true });
-            
-        if (chunkError) {
-            console.error(`Error finding chunk for metadata: ${chunkError.message}`);
-            return;
-        }
-        
-        if (!chunks || chunks.length === 0) {
-            console.error(`No chunks found for document ${documentId}`);
-            return;
-        }
-        
-        // Get the chunk at the specified index, or the last chunk if index is too large
-        const chunk = chunks[Math.min(chunkIndex, chunks.length - 1)];
-        
-        if (!chunk) {
-            console.error(`Chunk at index ${chunkIndex} not found for document ${documentId}`);
-            return;
-        }
-        
-        // Now update the chunk with metadata
-        const { error: updateError } = await supabase
-            .from('chunks')
-            .update({
-                metadata: metadata,
-                raw_metadata: rawResponse,
-                metadata_model: model,
-                api_metadata: apiMetadata,
-                updated_at: new Date().toISOString(),
-                // Add any new token usage fields if they exist in apiMetadata
-                metadata_input_tokens: apiMetadata?.usage?.prompt_tokens || null,
-                metadata_output_tokens: apiMetadata?.usage?.completion_tokens || null,
-                metadata_total_tokens: apiMetadata?.usage?.total_tokens || null
-            })
-            .eq('id', chunk.id);
-            
-        if (updateError) {
-            console.error(`Error saving chunk metadata: ${updateError.message}`);
-            return;
-        }
-        
-        console.log(`Successfully saved metadata for chunk ${chunk.id}`);
-    } catch (error) {
-        console.error(`Exception in saveChunkMetadata: ${error.message}`);
+export async function saveChunkMetadata(
+  documentId,
+  chunkIndex,
+  metadata,
+  model,
+  rawResponse,
+  apiMetadata = {}
+) {
+  try {
+    /* 1️⃣ Locate the chunk row (only to fetch its UUID) */
+    logger.debug('[saveChunkMetadata] Locating chunk-id…', { documentId, chunkIndex });
+
+    const { data: chunks, error: selErr } = await supabase
+      .from('chunks')
+      .select('id')
+      .eq('document_id', documentId)
+      .order('id', { ascending: true });
+
+    if (selErr)   return logger.error('[saveChunkMetadata] Select error:', selErr), { error: selErr };
+    if (!chunks?.length)
+      return logger.warn('[saveChunkMetadata] No chunks found for doc', documentId), { error: new Error('chunk_not_found') };
+
+    const chunkId = chunks[Math.min(chunkIndex, chunks.length - 1)].id;
+    logger.debug('[saveChunkMetadata] Using chunk-id', chunkId);
+
+    /* 2️⃣ Shape data to match `public.chunk_metadata` */
+    const row = {
+      document_id  : documentId,
+      chunk_index  : chunkIndex,
+      chunk_id     : chunkId,
+
+      /* main metadata fields (null / [] defaults) */
+      long_summary               : metadata.long_summary               ?? null,
+      short_summary              : metadata.short_summary              ?? null,
+      quiz_questions             : metadata.quiz_questions             ?? [],
+      followup_thinking_questions: metadata.followup_thinking_questions?? [],
+      generated_title            : metadata.generated_title            ?? null,
+      tags_he                    : metadata.tags_he                    ?? [],
+      key_terms_he               : metadata.key_terms_he               ?? [],
+      key_phrases_he             : metadata.key_phrases_he             ?? [],
+      key_phrases_en             : metadata.key_phrases_en             ?? [],
+      bibliography_snippets      : metadata.bibliography_snippets      ?? [],
+      questions_explicit         : metadata.questions_explicit         ?? [],
+      questions_implied          : metadata.questions_implied          ?? [],
+      reconciled_issues          : metadata.reconciled_issues          ?? [],
+      qa_pair                    : metadata.qa_pair                    ?? null,
+      potential_typos            : metadata.potential_typos            ?? [],
+      identified_abbreviations   : metadata.identified_abbreviations   ?? [],
+      named_entities             : metadata.named_entities             ?? [],
+      novel_approaches           : metadata.novel_approaches           ?? [],
+
+      /* llm / token info */
+      raw_llm_response : rawResponse,
+      model_used       : model,
+      input_tokens     : apiMetadata?.usage?.prompt_tokens          ?? null,
+      output_tokens    : apiMetadata?.usage?.completion_tokens      ?? null,
+      total_tokens     : apiMetadata?.usage?.total_tokens           ?? null,
+      reasoning_tokens : apiMetadata?.usage?.completion_tokens_details?.reasoning_tokens ?? null,
+      cached_tokens    : apiMetadata?.usage?.prompt_tokens_details?.cached_tokens       ?? null,
+    };
+
+    logger.debug('[saveChunkMetadata] Upserting row:', row);
+
+    /* 3️⃣ Upsert into chunk_metadata */
+    const { error: upErr } = await supabase
+      .from('chunk_metadata')
+      .upsert(row, { onConflict: 'document_id,chunk_index' });
+
+    if (upErr) {
+      logger.error('[saveChunkMetadata] Upsert failed:', upErr);
+      return { error: upErr };
     }
+
+    logger.info('[saveChunkMetadata] ✅ metadata saved (doc,idx)=', documentId, chunkIndex);
+    return { ok: true };
+  } catch (e) {
+    logger.error('[saveChunkMetadata] Exception:', e);
+    return { error: e };
+  }
 }
 
 // Add a function to check for recent database activity
@@ -682,3 +702,13 @@ function buildChunkRow(chunk, docId) {
     end_snippet: chunk.endSnippet ?? null,
   };
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+ *  Local fallback logger (top of file – keep only ONE copy in the module)
+ * ────────────────────────────────────────────────────────────────────────*/
+const logger = globalThis.logger ?? {
+  debug : (...a) => console.debug('[DEBUG][supabaseService]', ...a),
+  info  : (...a) => console.info ('[INFO ][supabaseService]', ...a),
+  warn  : (...a) => console.warn ('[WARN ][supabaseService]', ...a),
+  error : (...a) => console.error('[ERROR][supabaseService]', ...a),
+};

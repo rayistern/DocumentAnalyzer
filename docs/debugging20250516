@@ -1,0 +1,30 @@
+# Debug Session – 2025-05-16  
+### “Hebrew chunks, missing logger & Supabase schema mismatches”
+
+---
+
+## 1️⃣  Goal
+
+* Clean & chunk Hebrew `.docx` files  
+* Persist raw LLM output, chunk rows **and** per-chunk metadata  
+* Eliminate runtime crashes (`logger is not defined`, enum violations, etc.)
+
+---
+
+## 2️⃣  Files changed
+
+| File | Purpose |
+|------|---------|
+| `src/index.mjs` | Global fallback `logger` – defined **before any imports** |
+| `src/utils/jsonUtils.mjs` | Same fallback (module-local) |
+| `src/utils/chunkingUtils.mjs` | Same fallback + Hebrew-aware `extractChunkBySnippets_V3` |
+| `src/services/openaiService.mjs` | • Fixed bad column names  <br>• Removed illegal `status` updates  <br>• Re-implemented `findWordPosition` with RTL support  |
+| `src/services/supabaseService.mjs` | Re-wrote `saveChunkMetadata` helper |
+| _new_ doc (this file) | Session changelog |
+
+---
+
+## 3️⃣  Logging fixes
+
+* **Problem** – Several modules referenced a global `logger` that sometimes didn’t exist yet.  
+* **Fix** – Minimal console-proxy placed in `globalThis.logger` (and local copies for standalone utilities).

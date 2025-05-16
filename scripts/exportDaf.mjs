@@ -108,7 +108,7 @@ async function fetchChunks(whereClause, pageSize = 100) {
       
       const { data: chunks, error: chunksError } = await supabase
         .from('chunks')
-        .select('id, start_index, cleaned_text, chunk_index, chunk_metadata(long_summary, short_summary, generated_title, quiz_questions, followup_thinking_questions, qa_pair)')
+        .select('id, start_index, cleaned_text, chunk_index, chunk_metadata(long_summary, short_summary, quiz_questions, followup_thinking_questions, qa_pair)')
         .eq('document_id', docId)
         .order('start_index', { ascending: true })
         .range(offset, offset + limit - 1);
@@ -199,20 +199,35 @@ function buildColumns(rows) {
 
 
 // ╭─────────────────────────────────────────────────────────────────────────╮
-// │ 5. Wrap everything in a self-contained HTML page                       │
+// │ 5. Wrap everything in a self-contained HTML page with system fonts      │
 function buildHtml({ mainHTML = '', innerHTML = '', outerHTML = '' } = {}) {
   const DAF_JS = 'https://unpkg.com/daf-renderer@latest/dist/daf-renderer.min.js';
-
+  
   return `<!DOCTYPE html>
 <html lang="he">
 <head>
   <meta charset="utf-8">
   <title>Daf</title>
-  <style>body{margin:0;padding:0;font-family:"Times New Roman",serif;}</style>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+    }
+    #daf {
+      margin: 2rem;
+    }
+    /* System fonts with Hebrew support */
+    [lang="he"] {
+      font-family: "Times New Roman", serif;
+    }
+    [lang="en"], .commentary {
+      font-family: "Arial", "Helvetica", sans-serif;
+    }
+  </style>
   <script src="${DAF_JS}"></script>
 </head>
 <body>
-  <div id="daf" style="margin:2rem;"></div>
+  <div id="daf"></div>
 
   <script>
     (function init() {
@@ -220,7 +235,11 @@ function buildHtml({ mainHTML = '', innerHTML = '', outerHTML = '' } = {}) {
 
       const renderer = window.dafRenderer("#daf", {
         contentWidth: "900px",
-        fontFamily: { main: "Times New Roman", inner: "Times New Roman", outer: "Times New Roman" }
+        fontFamily: { 
+          main: "Times New Roman, serif", 
+          inner: "Arial, Helvetica, sans-serif", 
+          outer: "Arial, Helvetica, sans-serif" 
+        }
       });
 
       renderer.render(
