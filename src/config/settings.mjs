@@ -20,7 +20,7 @@ export const OPENAI_SETTINGS = {
         operations: {
             clean: "gpt-4.1-mini",
             chunk: "o4-mini",
-            metadata: "gpt-4.1-mini",
+            metadata: "o3",
             summarize: "gpt-4o-mini",
             sentiment: "gpt-4o-mini",
             fullMetadata: "o3"
@@ -70,7 +70,7 @@ export const OPENAI_PROMPTS = {
         }),
         fullMetadata: (overview = '', ) => ({
             role: "user",
-            content: `${overview ? overview + '\n\n' : ''}Provide metadata (in English) in the following JSON format (with no preface):
+            content: `${overview ? overview + '\n\n' : ''}Provide metadata (in English or transliteration, no Hebrew characters) in the following JSON format (with no preface):
 {
     "longDescription": "1-2 paragraphs describing the main content and arguments. Leverage transliterated Hebrew terminology for domain specific terms.",
     "keywords": ["array", "of", "key", "topics", "and", "themes"], -- specific keywords on this specific piece of text or letter, not generic like "chabad" or "jewish"

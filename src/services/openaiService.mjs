@@ -1475,187 +1475,76 @@ async function cleanAndChunkDocument(
             parsedResponse.chunks = parsedResponse.chunks.map((chunk, index) => {
                 console.log(`\nChunk ${index + 1}:`);
                 console.log(`Original: Start: ${chunk.startIndex}, End: ${chunk.endIndex}`);
-                
-                /**
-                 * STEP 1: OFFSET ADJUSTMENT
-                 * 
-                 * Apply cumulative offset from previous chunks in this prechunk.
-                 * This accounts for any drift between where the LLM thinks positions are
-                 * and where they actually are (often due to Unicode handling differences).
-                 * 
-                 * NOTE: The LLM's position numbers already account for remainder text
-                 * because remainder is prepended to the text before sending to the LLM.
-                 */
-                const offsetAdjustedStartIndex = chunk.startIndex + cumulativeOffset - 1; // Convert to 0-indexed
-                const offsetAdjustedEndIndex = chunk.endIndex + cumulativeOffset - 1;  // Convert to 0-indexed
-                
-                console.log(`After offset adjustment: Start: ${offsetAdjustedStartIndex+1}, End: ${offsetAdjustedEndIndex+1}`);
-                
-                // Extract first and last words for boundary detection
-                if (chunk.cleanedText && chunk.cleanedText.trim().length > 0) {
-                    // Get words from the cleanedText
-                    const words = chunk.cleanedText.trim().split(/\s+/);
-                    
-                    // Use firstWords/lastWords from LLM if available, otherwise extract from cleanedText
-                    if (chunk.firstWords) {
-                        chunk.firstWord = chunk.firstWords;
-                        console.log(`Using LLM-provided firstWords: "${chunk.firstWord}"`);
-                    } else {
-                    // Extract 3-4 word phrases for more robust boundary detection
-                    const startPhraseLength = Math.min(4, Math.ceil(words.length / 4), words.length);
-                    chunk.firstWord = words.slice(0, startPhraseLength).join(' ');
-                        console.log(`Generated firstWord phrase: "${chunk.firstWord}"`);
-                    }
-                    
-                    if (chunk.lastWords) {
-                        chunk.lastWord = chunk.lastWords;
-                        console.log(`Using LLM-provided lastWords: "${chunk.lastWord}"`);
-                    } else {
-                    // For the end phrase, take the last 3-4 words (or fewer if not available)
-                    const endPhraseLength = Math.min(4, Math.ceil(words.length / 4), words.length);
-                    chunk.lastWord = words.slice(-endPhraseLength).join(' ');
-                        console.log(`Generated lastWord phrase: "${chunk.lastWord}"`);
-                    }
-                    
-                    console.log(`Boundary phrases detected:`);
-                    console.log(`- First phrase: "${chunk.firstWord}"`);
-                    console.log(`- Last phrase: "${chunk.lastWord}"`);
+                console.log(`After offset adjustment: Start: ${chunk.startIndex + cumulativeOffset}, End: ${chunk.endIndex + cumulativeOffset}`);
+
+                console.log(`\n======== WORD BOUNDARY DETECTION - CHUNK ${index + 1} ========`);
+                console.log("Finding exact word boundaries for precise chunking:");
+                console.log(`- First word to find: "${chunk.startSnippet}"`);
+                console.log(`- Last word to find: "${chunk.endSnippet}"`);
+                console.log(`- Starting search at positions: ${chunk.startIndex + cumulativeOffset}-${chunk.endIndex + cumulativeOffset}`);
+
+                let alignedStartIdx = findWordPosition(
+                    finalCleanedText,
+                    chunk.startSnippet,
+                    chunk.startIndex + cumulativeOffset,
+                    true, // isStart
+                    previousAdjustedEnd // Pass the end of the previous chunk
+                );
+
+                // --- BEGIN MODIFICATION: Enforce contiguous chunks ---
+                if (index > 0 && alignedStartIdx > previousAdjustedEnd + 1) {
+                    const oldAlignedStartIdx = alignedStartIdx;
+                    alignedStartIdx = previousAdjustedEnd + 1;
+                    logger.warn(`[CONTIGUOUS_CHUNK_FIX] Chunk ${index + 1} start index adjusted to be contiguous. Was: ${oldAlignedStartIdx}, Now: ${alignedStartIdx}. Previous chunk ended at: ${previousAdjustedEnd}`);
                 }
-                
-                // Use the word boundary detection to get accurate positions
-                if (chunk.firstWord && chunk.lastWord) {
-                    // Use offset-adjusted positions as the starting point for word search
-                    const suggestedStartIndex = offsetAdjustedStartIndex;
-                    const suggestedEndIndex = offsetAdjustedEndIndex;
-                    
-                    console.log(`\n======== WORD BOUNDARY DETECTION - CHUNK ${index + 1} ========`);
-                    console.log(`Finding exact word boundaries for precise chunking:`);
-                    console.log(`- First word to find: "${chunk.firstWord}"`);
-                    console.log(`- Last word to find: "${chunk.lastWord}"`);
-                    console.log(`- Starting search at positions: ${suggestedStartIndex+1}-${suggestedEndIndex+1}`);
-                    
-                    /**
-                     * STEP 2: WORD BOUNDARY DETECTION
-                     * 
-                     * Find exact word boundaries to ensure chunks break at natural points.
-                     * This is crucial for proper text extraction and avoiding broken words.
-                     * The findWordPosition function does fuzzy matching to handle cases
-                     * where exact matches aren't found.
-                     */
-                    // Adjust positions based on actual word locations
-                    const adjustedStartIndex = findWordPosition(
-                        finalCleanedText, 
-                        chunk.firstWord, 
-                        suggestedStartIndex, 
-                        true, 
-                        previousAdjustedEnd
-                    );
-                    
-                    const adjustedEndIndex = findWordPosition(
-                        finalCleanedText, 
-                        chunk.lastWord, 
-                        suggestedEndIndex, 
-                        false, 
-                        0  // Don't constrain end position using start position
-                    );
-                    
-                    // Update with adjusted positions (convert back to 1-indexed)
-                    chunk.adjustedStartIndex = adjustedStartIndex + 1;
-                    chunk.adjustedEndIndex = adjustedEndIndex + 1;
-                    previousAdjustedEnd = adjustedEndIndex;
-                    
-                    // Track additional metrics for database storage
-                    chunk.within_tolerance = Math.abs(adjustedStartIndex - suggestedStartIndex) <= tolerance && 
-                                             Math.abs(adjustedEndIndex - suggestedEndIndex) <= tolerance;
-                    chunk.position_difference = adjustedEndIndex - suggestedEndIndex;
-                    chunk.llm_suggested_end = chunk.endIndex;
-                    chunk.actual_end = chunk.adjustedEndIndex;
-                    chunk.first_word_match = adjustedStartIndex === suggestedStartIndex;
-                    chunk.last_word_match = adjustedEndIndex === suggestedEndIndex;
-                    
-                    console.log(`\nWORD BOUNDARY RESULTS:`);
-                    console.log(`- Original positions: ${chunk.startIndex}-${chunk.endIndex}`);
-                    console.log(`- Final adjusted positions: ${chunk.adjustedStartIndex}-${chunk.adjustedEndIndex}`);
-                    console.log(`- Position change: start ${chunk.adjustedStartIndex - chunk.startIndex}, end ${chunk.adjustedEndIndex - chunk.endIndex}`);
-                    console.log(`======== END WORD BOUNDARY DETECTION ========\n`);
-                    
-                    /**
-                     * STEP 3: CUMULATIVE OFFSET CALCULATION
-                     * 
-                     * Calculate how far the actual end position (adjustedEndIndex) differs 
-                     * from where the LLM thought it was (chunk.endIndex-1). This "drift"
-                     * is applied to future chunks in this prechunk, not the current one.
-                     */
-                    const newOffset = adjustedEndIndex - (chunk.endIndex - 1);  // Compare to original end position
-                    console.log(`Position drift: ${newOffset} characters from LLM's calculation (will be applied to future chunks)`);
-                    cumulativeOffset = newOffset;  // Update for next chunk
-                    
-                    /**
-                     * STEP 4: TEXT RE-EXTRACTION
-                     * 
-                     * Now that we have final adjusted positions, we re-extract the text
-                     * to ensure we have accurate text content that aligns with word boundaries.
-                     */
-                    // If positions were adjusted, re-extract the text
-                    if (adjustedStartIndex !== suggestedStartIndex || adjustedEndIndex !== suggestedEndIndex) {
-                        console.log(`Positions adjusted: ${suggestedStartIndex+1}-${suggestedEndIndex+1} -> ${chunk.adjustedStartIndex}-${chunk.adjustedEndIndex}`);
-                        
-                        // Re-extract the text with adjusted positions
-                        if (adjustedStartIndex < adjustedEndIndex && adjustedEndIndex <= finalCleanedText.length) {
-                            chunk.cleanedText = finalCleanedText.substring(adjustedStartIndex, adjustedEndIndex);
-                            console.log(`Re-extracted text with adjusted boundaries`);
-                        }
-                    }
-                } else if (!chunk.cleanedText && chunk.startIndex && chunk.endIndex) {
-                    // If no cleanedText but position info exists
-                    // Fix positions if needed to ensure valid extraction
-                    console.log(`\n⚠️ CHUNK HAS POSITIONS BUT NO TEXT - attempting to extract text from positions`);
-                    
-                    // Validate positions are within bounds
-                    // Use the adjusted positions instead of the original positions
-                    const start = Math.max(0, offsetAdjustedStartIndex); // Already 0-indexed
-                    const end = Math.min(finalCleanedText.length, offsetAdjustedEndIndex);
-                    
-                    console.log(`Extracting text from positions: ${start} to ${end} (length: ${end-start})`);
-                    console.log(`finalCleanedText length: ${finalCleanedText.length}`);
-                    
-                    if (start >= end) {
-                        console.error(`❌ Invalid position range: start(${start}) >= end(${end})`);
-                        chunk.cleanedText = ''; // Empty string to avoid null/undefined
-                    } else if (start < 0 || end > finalCleanedText.length) {
-                        console.error(`❌ Out of bounds position: start(${start}), end(${end}), text length(${finalCleanedText.length})`);
-                        chunk.cleanedText = ''; // Empty string to avoid null/undefined
-                    } else {
-                        // Extract text using positions
-                        chunk.cleanedText = finalCleanedText.substring(start, end);
-                        
-                        // Check if we got valid text (not just whitespace)
-                        if (chunk.cleanedText.trim().length > 0) {
-                            console.log(`✅ Successfully extracted text (${chunk.cleanedText.length} chars)`);
-                            console.log(`Text sample: "${chunk.cleanedText.substring(0, Math.min(50, chunk.cleanedText.length))}..."`);
-                            
-                            // Extract first/last words
-                            const words = chunk.cleanedText.trim().split(/\s+/).filter(w => w.length > 0);
-                            chunk.firstWord = words.length > 0 ? words[0] : '';
-                            chunk.lastWord = words.length > 0 ? words[words.length - 1] : '';
-                            console.log(`Words detected - First: "${chunk.firstWord}", Last: "${chunk.lastWord}"`);
-                        } else {
-                            // Just use the text even if it's whitespace - don't filter it out here
-                            console.log(`⚠️ WARNING: Extracted text contains only whitespace`);
-                            console.log(`Raw text (hex): ${Array.from(chunk.cleanedText).map(c => c.charCodeAt(0).toString(16)).join(' ')}`);
-                            
-                            // Still set first/last word for debugging purposes
-                            chunk.firstWord = '';
-                            chunk.lastWord = '';
-                        }
-                    }
-                } else if (!chunk.cleanedText) {
-                    console.error(`❌ Cannot extract text - chunk has no cleanedText and insufficient position data`);
-                    chunk.cleanedText = ''; // Empty string to avoid null/undefined
-                }
-                
-                console.log(`Final text: ${chunk.cleanedText ? chunk.cleanedText.substring(0, 30) + "..." : "No text provided"}`);
-                return chunk;
+                // --- END MODIFICATION ---
+
+                let alignedEndIdx = findWordPosition(
+                    finalCleanedText,
+                    chunk.endSnippet,
+                    chunk.endIndex + cumulativeOffset,
+                    false, // isStart
+                    alignedStartIdx // Pass the (potentially adjusted) start of the current chunk
+                );
+
+                console.log('\nWORD BOUNDARY RESULTS:');
+                console.log(`- Original positions: ${chunk.startIndex}-${chunk.endIndex}`);
+                console.log(`- Final adjusted positions: ${alignedStartIdx}-${alignedEndIdx}`);
+                const startChange = alignedStartIdx - (chunk.startIndex + cumulativeOffset);
+                const endChange = alignedEndIdx - (chunk.endIndex + cumulativeOffset);
+                console.log(`- Position change: start ${startChange}, end ${endChange}`);
+                console.log('======== END WORD BOUNDARY DETECTION ========');
+
+
+                const drift = (alignedEndIdx - (chunk.endIndex + cumulativeOffset));
+                console.log(`\nPosition drift: ${drift} characters from LLM's calculation (will be applied to future chunks)`);
+                cumulativeOffset += drift;
+                console.log(`Positions adjusted: ${chunk.startIndex + cumulativeOffset - drift}-${chunk.endIndex + cumulativeOffset - drift} -> ${alignedStartIdx}-${alignedEndIdx}`);
+
+                const startIdxForDb = alignedStartIdx;
+                const endIdxForDb = alignedEndIdx; // Assuming findWordPosition for end is already inclusive or handled by appendEndSnippetIfMissing
+
+                //  `endIdxForDb` is inclusive → add 1 for JS slice
+                const actualChunkContent =
+                  finalCleanedText.slice(startIdxForDb, endIdxForDb + 1);
+
+                console.log('Re-extracted text with adjusted boundaries');
+                console.log(`Final text: ${actualChunkContent.substring(0,30)}...`);
+
+
+                // Update previousAdjustedEnd for the next iteration
+                previousAdjustedEnd = endIdxForDb;
+
+                return {
+                    ...chunk,
+                    startIndex: startIdxForDb,
+                    endIndex: endIdxForDb,
+                    cleanedText: actualChunkContent,
+                    startSnippet: chunk.startSnippet,
+                    endSnippet: chunk.endSnippet,
+                    startSnippetPosition: chunk.startIndex + cumulativeOffset,
+                    endSnippetPosition: chunk.endIndex + cumulativeOffset
+                };
             });
         } else {
             // If LLM didn't return chunks, treat entire cleaned text as remainder
