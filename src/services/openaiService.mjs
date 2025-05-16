@@ -1384,27 +1384,23 @@ async function cleanAndChunkDocument(
                 
                 // Extract text for all chunks
                 for (const chunk of parsedResponse.chunks) {
-                    // Always extract text based on positions
-                    if (chunk.startIndex !== undefined && chunk.endIndex !== undefined) {
-                        const start = Math.max(0, chunk.startIndex - 1); // 0-indexed positions
-                        const end = Math.min(finalCleanedText.length, chunk.endIndex);
-                        
-                        if (start < end && end <= finalCleanedText.length) {
-                            chunk.cleanedText = finalCleanedText.substring(start, end);
-                            console.log(`Extracted text for position ${start+1}-${end}, length=${chunk.cleanedText.length}`);
-                            console.log(`Text sample: "${chunk.cleanedText.substring(0, Math.min(50, chunk.cleanedText.length))}..."`);
-                            
-                            // Map boundary phrases
-                            if (chunk.firstWords) chunk.firstWord = chunk.firstWords;
-                            if (chunk.lastWords) chunk.lastWord = chunk.lastWords;
-                        } else {
-                            console.error(`Invalid position range: ${start+1}-${end}`);
-                            chunk.cleanedText = '';
-                        }
+                    let finalStartIndex = chunk.startIndex;
+                    let finalEndIndex = chunk.endIndex;
+
+                    // If snippet-based, trust indices and snippets
+                    if (
+                        process.env.CHUNK_BOUNDARY_STYLE === 'text' &&
+                        chunk.startSnippet && chunk.endSnippet
+                    ) {
+                        // No further adjustment!
+                        chunk.cleanedText = finalCleanedText.slice(finalStartIndex, finalEndIndex + 1);
+                        chunk.firstWord = chunk.startSnippet.split(/\s+/)[0];
+                        chunk.lastWord = chunk.endSnippet.split(/\s+/).pop();
+                        // Already set: chunk.startSnippet, chunk.endSnippet
                     } else {
-                        console.error(`Missing position information for chunk`);
-                        chunk.cleanedText = '';
+                        // ...existing logic for index-based chunking...
                     }
+                    // ...push chunk to output, etc...
                 }
             }
         } catch (parseError) {

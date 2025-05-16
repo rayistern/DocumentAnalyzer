@@ -46,6 +46,7 @@ export const OPENAI_PROMPTS = {
                 - Footnote numbers or reference markers within the body of the text (along with their punctuation)
                 - Version numbers or draft markings
                 - Any other non-content structural elements
+                - The text being removed will be short snippets; if you ever find yourself removing longer passages, rethink it please.
 
                 For each piece of text to remove, provide:
                 1. The exact text to remove, including punctuation
@@ -88,12 +89,16 @@ export const OPENAI_PROMPTS = {
                 {
                     "chunks": [
                         {
+                            "chunkIndex": 1,
+                            "title": "Introduction",
                             "startIndex": 1,
                             "endIndex": 23,
                             "firstWords": "The quick brown fox",
                             "lastWords": "the lazy dog."
                         }
                         {
+                            "chunkIndex": 2,
+                            "title": "Main Argument",
                             "startIndex": 24,
                             "endIndex": 55,
                             "firstWords": "And then we begin our",
@@ -222,11 +227,17 @@ ${isIncomplete
   ? '- The text will likely spill over; leave the tail un-chunked and set "remainder": true.'
   : '- If the text seems complete, ensure chunks reach the end and set "remainder": false.'}
 - If the entire text is one theme you may return a single chunk.
+- Make sure chunk1 ends before chunk2 begins - no overlap.
 
 Return *only* this JSON (no preface):
 {
   "chunks": [
-    { "startSnippet":"The quick brown fox", "endSnippet":"the lazy dog." }
+    {
+      "chunkIndex": 1,
+      "title": "Introduction",
+      "startSnippet":"The quick brown fox",
+      "endSnippet":"the lazy dog."
+    }
   ],
   "remainder": false
 }`

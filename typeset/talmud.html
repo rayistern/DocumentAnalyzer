@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="he">
+<head>
+<meta charset="UTF-8">
+<title>Talmud three‑column layout</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+html,body{margin:0;padding:0;font-family:"Times New Roman",serif;}
+#toolbar{padding:12px;background:#f7f7f7;border-bottom:1px solid #ccc;}
+#page{padding:16px;display:grid;row-gap:1.2em;}
+/* three columns: L‑commentary | Gemara | R‑commentary */
+.chunk{display:grid;grid-template-columns:1fr 2.2fr 1fr;column-gap:1em;}
+.cm-left{direction:ltr;text-align:left;font-size:0.9em;color:#555;}
+.gemara{direction:rtl;text-align:justify;line-height:1.4;}
+.cm-right{direction:ltr;text-align:left;font-size:0.95em;background:#fafafa;padding-left:.6em;border-left:2px solid #eee;}
+@media(max-width:900px){
+  .chunk{grid-template-columns:1fr;}
+  .cm-left,.cm-right{order:2}
+}
+</style>
+</head>
+<body>
+  <div id="toolbar">
+    <label>Load <strong>chunks_rows.sql</strong> &amp; <strong>chunk_metadata_rows.sql</strong>:
+      <input type="file" id="files" multiple accept=".sql">
+    </label>
+  </div>
+
+  <div id="page"><p>📜 Select the two SQL files to view the Daf.</p></div>
+
+<script>
+// ---------------------------------------------------------------------------
+// MAIN EVENT: read files, parse, render
+// ---------------------------------------------------------------------------
+document.getElementById('files').addEventListener('change', async e=>{
+  const texts = await Promise.all([...e.target.files].map(f=>f.text()));
+  const chunkSql = texts.find(t=>t.includes('"public"."chunks"'));
+  const metaSql  = texts.find(t=>t.includes('"public"."chunk_metadata"'));
+  if(!chunkSql || !metaSql){ alert('Both dumps are required'); return; }
+
+  const chunks = parseTuples(chunkSql).map(mapChunk);
+  const metas  = Object.fromEntries(
+                   parseTuples(metaSql).map(m=>[+m[2], mapMeta(m)])
+                 );
+
+  chunks.sort((a,b)=>a.start_index - b.start_index);
+
+  // attach sequential index (1‑based) so we can pair with metadata.chunk_index
+  chunks.forEach((c,i)=>c.seq = i+1);
+
+  render(chunks, metas);
+});
+
+// ---------------------------------------------------------------------------
+// PARSER – tolerant to commas, parentheses, quotes inside fields
+// ---------------------------------------------------------------------------
+function parseTuples(sql){
+  const tuples=[], vals=[], token=[], stack=[];
+  let i=sql.indexOf('VALUES'), inQuote=false;
+  if(i===-1) return tuples;
+  for(i+=6;i<sql.length;i++){
+    const ch=sql[i], prev=sql[i-1];
+    if(ch==="'" && prev!="'") inQuote=!inQuote;          // toggle on single '
+    if(!inQuote){
+      if(ch==='('){stack.push(ch); if(stack.length===1) continue;}
+      if(ch===')'){stack.pop(); if(stack.length===0){vals.push(token.join('').trim());tuples.push(splitCSV(vals.join('')));vals.length=0;token.length=0;continue;}}
+      if(ch===',' && stack.length===0) continue;         // skip tuple separators
+    }
+    token.push(ch);
+    if(!inQuote && ch===',' && stack.length===1){vals.push(token.join('').slice(0,-1));token.length=0;}
+  }
+  return tuples;
+}
+function splitCSV(str){
+  const out=[], cur=[], len=str.length;
+  let inQuote=false;
+  for(let i=0;i<len;i++){
+    const ch=str[i], next=str[i+1];
+    if(ch==="'" && next==="'" ){cur.push("'"); i++; continue;} // escaped '
+    if(ch==="'" ){inQuote=!inQuote; continue;}
+    if(ch===',' && !inQuote){out.push(cur.join('').trim());cur.length=0;continue;}
+    cur.push(ch);
+  }
+  out.push(cur.join('').trim());
+  return out;
+}
+const unq = s=>s?.startsWith("'")?s.slice(1,-1):s;
+
+// ---------------------------------------------------------------------------
+// COLUMN MAPPERS
+// ---------------------------------------------------------------------------
+function mapChunk(c){
+  return {
+    start_index:+c[2],
+    cleaned_text:unq(c[6])
+  };
+}
+function mapMeta(m){
+  return {
+    long_summary : unq(m[3]),
+    short_summary: unq(m[4]),
+    generated_title: unq(m[7]) || ''
+  };
+}
+
+// ---------------------------------------------------------------------------
+// RENDERER
+// ---------------------------------------------------------------------------
+function render(chunks, metas){
+  const host=document.getElementById('page');
+  host.innerHTML='';
+  chunks.forEach(c=>{
+    const meta=metas[c.seq]||{};
+    const wrap=document.createElement('div');wrap.className='chunk';
+
+    const left = document.createElement('div');
+    left.className='cm-left';
+    left.innerHTML = `<strong>${meta.generated_title||''}</strong>`;
+
+    const mid  = document.createElement('div');
+    mid.className='gemara';
+    mid.textContent=c.cleaned_text;
+
+    const right= document.createElement('div');
+    right.className='cm-right';
+    right.innerHTML = `<p>${meta.long_summary||''}</p><hr><p>${meta.short_summary||''}</p>`;
+
+    wrap.append(left, mid, right);
+    host.appendChild(wrap);
+  });
+}
+</script>
+</body>
+</html>

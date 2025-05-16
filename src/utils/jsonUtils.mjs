@@ -9,6 +9,8 @@ import { z } from 'zod';
 export const chunkSchema = z.object({
     startIndex: z.number().int().positive(),
     endIndex: z.number().int().positive(),
+    chunkIndex: z.number().int().positive().optional(),
+    title: z.string().optional(),
     firstWords: z.string().optional(),
     lastWords: z.string().optional(),
     // Additional fields that might be present
@@ -636,7 +638,7 @@ export function cleanControlCharacters(text) {
  * 
  * IMPORTANT: Parameter order matters! Common source of bugs:
  * 1. jsonResponseText - The raw LLM response to parse (required)
- * 2. cleanedText - The text sent to the LLM (for fallbacks, can be null)
+ * 2. cleanedText - The cleaned input text sent to the LLM (for fallbacks, can be null)
  * 3. schemaType - The expected schema type ('chunk', 'metadata', etc.)
  * 
  * Common issues:
@@ -668,6 +670,60 @@ export function parseJsonResponse(jsonResponseText, cleanedText = null, schemaTy
     try {
         const parsed = JSON.parse(sanitizedJson);
         
+        if (schemaType === 'chunk' && Array.isArray(parsed.chunks) && cleanedText) {
+            const processedChunks = [];
+            let currentSearchStartPos = 0; // Where to begin searching for the *next* startSnippet
+
+            for (const chunk of parsed.chunks) {
+                // Process only if indices are missing and snippets are present
+                if (chunk.startIndex == null && chunk.startSnippet && chunk.endSnippet) {
+                    const sIdx = cleanedText.indexOf(chunk.startSnippet, currentSearchStartPos);
+
+                    if (sIdx === -1) {
+                        console.log(`⚠️ startSnippet "${chunk.startSnippet.substring(0, 40)}..." not found starting from pos ${currentSearchStartPos}. Skipping chunk titled "${chunk.title}".`);
+                        continue; // Skip this chunk
+                    }
+
+                    // Search for endSnippet *after* the current startSnippet's content
+                    const eIdx = cleanedText.indexOf(chunk.endSnippet, sIdx + chunk.startSnippet.length);
+
+                    if (eIdx === -1) {
+                        console.log(`⚠️ endSnippet "${chunk.endSnippet.substring(0, 40)}..." not found after its startSnippet (sIdx ${sIdx}) for chunk titled "${chunk.title}". Skipping chunk.`);
+                        continue; // Skip this chunk
+                    }
+
+                    const calculatedEndIndex = eIdx + chunk.endSnippet.length - 1;
+
+                    if (calculatedEndIndex < sIdx) {
+                        console.log(`⚠️ Calculated endIndex (${calculatedEndIndex}) is before startIndex (${sIdx}) for chunk titled "${chunk.title}". Snippet: "${chunk.startSnippet.substring(0,20)}...". Skipping chunk.`);
+                        continue; // Skip this chunk
+                    }
+                    
+                    processedChunks.push({
+                        ...chunk, // Keep original chunk fields like title, chunkIndex
+                        startIndex: sIdx,
+                        endIndex: calculatedEndIndex,
+                        firstWord: chunk.startSnippet, // Populate firstWord with startSnippet
+                        lastWord: chunk.endSnippet,   // Populate lastWord with endSnippet
+                        // Ensure original startSnippet/endSnippet are not accidentally overwritten if they were part of ...chunk
+                        startSnippet: chunk.startSnippet,
+                        endSnippet: chunk.endSnippet
+                    });
+                    // Next search must start after the current chunk has definitively ended
+                    currentSearchStartPos = calculatedEndIndex + 1; 
+                } else {
+                    // Chunk already has indices, or doesn't have snippets to process; keep as is
+                    // If it has snippets but also indices, we trust the existing indices.
+                    processedChunks.push(chunk);
+                     // If this chunk had indices, update search position based on them
+                    if (chunk.endIndex != null) {
+                         currentSearchStartPos = Math.max(currentSearchStartPos, chunk.endIndex + 1);
+                    }
+                }
+            }
+            parsed.chunks = processedChunks; // Replace original chunks with processed ones
+        }
+        
         // Fix metadata structure if applicable
         const fixedParsed = schemaType === 'metadata' ? fixMetadataStructure(parsed) : parsed;
         
@@ -692,6 +748,60 @@ export function parseJsonResponse(jsonResponseText, cleanedText = null, schemaTy
             try {
                 const parsed = JSON.parse(extractedJson);
                 
+                if (schemaType === 'chunk' && Array.isArray(parsed.chunks) && cleanedText) {
+                    const processedChunks = [];
+                    let currentSearchStartPos = 0; // Where to begin searching for the *next* startSnippet
+
+                    for (const chunk of parsed.chunks) {
+                        // Process only if indices are missing and snippets are present
+                        if (chunk.startIndex == null && chunk.startSnippet && chunk.endSnippet) {
+                            const sIdx = cleanedText.indexOf(chunk.startSnippet, currentSearchStartPos);
+
+                            if (sIdx === -1) {
+                                console.log(`⚠️ startSnippet "${chunk.startSnippet.substring(0, 40)}..." not found starting from pos ${currentSearchStartPos}. Skipping chunk titled "${chunk.title}".`);
+                                continue; // Skip this chunk
+                            }
+
+                            // Search for endSnippet *after* the current startSnippet's content
+                            const eIdx = cleanedText.indexOf(chunk.endSnippet, sIdx + chunk.startSnippet.length);
+
+                            if (eIdx === -1) {
+                                console.log(`⚠️ endSnippet "${chunk.endSnippet.substring(0, 40)}..." not found after its startSnippet (sIdx ${sIdx}) for chunk titled "${chunk.title}". Skipping chunk.`);
+                                continue; // Skip this chunk
+                            }
+
+                            const calculatedEndIndex = eIdx + chunk.endSnippet.length - 1;
+
+                            if (calculatedEndIndex < sIdx) {
+                                console.log(`⚠️ Calculated endIndex (${calculatedEndIndex}) is before startIndex (${sIdx}) for chunk titled "${chunk.title}". Snippet: "${chunk.startSnippet.substring(0,20)}...". Skipping chunk.`);
+                                continue; // Skip this chunk
+                            }
+                            
+                            processedChunks.push({
+                                ...chunk, // Keep original chunk fields like title, chunkIndex
+                                startIndex: sIdx,
+                                endIndex: calculatedEndIndex,
+                                firstWord: chunk.startSnippet, // Populate firstWord with startSnippet
+                                lastWord: chunk.endSnippet,   // Populate lastWord with endSnippet
+                                // Ensure original startSnippet/endSnippet are not accidentally overwritten if they were part of ...chunk
+                                startSnippet: chunk.startSnippet,
+                                endSnippet: chunk.endSnippet
+                            });
+                            // Next search must start after the current chunk has definitively ended
+                            currentSearchStartPos = calculatedEndIndex + 1; 
+                        } else {
+                            // Chunk already has indices, or doesn't have snippets to process; keep as is
+                            // If it has snippets but also indices, we trust the existing indices.
+                            processedChunks.push(chunk);
+                             // If this chunk had indices, update search position based on them
+                            if (chunk.endIndex != null) {
+                                 currentSearchStartPos = Math.max(currentSearchStartPos, chunk.endIndex + 1);
+                            }
+                        }
+                    }
+                    parsed.chunks = processedChunks; // Replace original chunks with processed ones
+                }
+                
                 // Fix metadata structure if applicable
                 const fixedParsed = schemaType === 'metadata' ? fixMetadataStructure(parsed) : parsed;
                 
@@ -713,6 +823,60 @@ export function parseJsonResponse(jsonResponseText, cleanedText = null, schemaTy
                 try {
                     const parsed = JSON.parse(repairedJson);
                     console.log("[HEBREW-HANDLING] Successfully parsed repaired JSON");
+                    
+                    if (schemaType === 'chunk' && Array.isArray(parsed.chunks) && cleanedText) {
+                        const processedChunks = [];
+                        let currentSearchStartPos = 0; // Where to begin searching for the *next* startSnippet
+
+                        for (const chunk of parsed.chunks) {
+                            // Process only if indices are missing and snippets are present
+                            if (chunk.startIndex == null && chunk.startSnippet && chunk.endSnippet) {
+                                const sIdx = cleanedText.indexOf(chunk.startSnippet, currentSearchStartPos);
+
+                                if (sIdx === -1) {
+                                    console.log(`⚠️ startSnippet "${chunk.startSnippet.substring(0, 40)}..." not found starting from pos ${currentSearchStartPos}. Skipping chunk titled "${chunk.title}".`);
+                                    continue; // Skip this chunk
+                                }
+
+                                // Search for endSnippet *after* the current startSnippet's content
+                                const eIdx = cleanedText.indexOf(chunk.endSnippet, sIdx + chunk.startSnippet.length);
+
+                                if (eIdx === -1) {
+                                    console.log(`⚠️ endSnippet "${chunk.endSnippet.substring(0, 40)}..." not found after its startSnippet (sIdx ${sIdx}) for chunk titled "${chunk.title}". Skipping chunk.`);
+                                    continue; // Skip this chunk
+                                }
+
+                                const calculatedEndIndex = eIdx + chunk.endSnippet.length - 1;
+
+                                if (calculatedEndIndex < sIdx) {
+                                    console.log(`⚠️ Calculated endIndex (${calculatedEndIndex}) is before startIndex (${sIdx}) for chunk titled "${chunk.title}". Snippet: "${chunk.startSnippet.substring(0,20)}...". Skipping chunk.`);
+                                    continue; // Skip this chunk
+                                }
+                                
+                                processedChunks.push({
+                                    ...chunk, // Keep original chunk fields like title, chunkIndex
+                                    startIndex: sIdx,
+                                    endIndex: calculatedEndIndex,
+                                    firstWord: chunk.startSnippet, // Populate firstWord with startSnippet
+                                    lastWord: chunk.endSnippet,   // Populate lastWord with endSnippet
+                                    // Ensure original startSnippet/endSnippet are not accidentally overwritten if they were part of ...chunk
+                                    startSnippet: chunk.startSnippet,
+                                    endSnippet: chunk.endSnippet
+                                });
+                                // Next search must start after the current chunk has definitively ended
+                                currentSearchStartPos = calculatedEndIndex + 1; 
+                            } else {
+                                // Chunk already has indices, or doesn't have snippets to process; keep as is
+                                // If it has snippets but also indices, we trust the existing indices.
+                                processedChunks.push(chunk);
+                                 // If this chunk had indices, update search position based on them
+                                if (chunk.endIndex != null) {
+                                     currentSearchStartPos = Math.max(currentSearchStartPos, chunk.endIndex + 1);
+                                }
+                            }
+                        }
+                        parsed.chunks = processedChunks; // Replace original chunks with processed ones
+                    }
                     
                     // Fix metadata structure if applicable
                     const fixedParsed = schemaType === 'metadata' ? fixMetadataStructure(parsed) : parsed;

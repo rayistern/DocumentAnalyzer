@@ -361,103 +361,25 @@ export async function saveAnalysis(content, type, metadata = {}) {
                 });
             }
             
-            const chunksToInsert = metadata.chunks
-                .filter(chunk => {
-                    // More robust filtering logic
-                    if (!chunk.startIndex || !chunk.endIndex) {
-                        console.log(`⚠️ Filtered out chunk: missing position info`);
-                        return false;
-                    }
-                    
-                    // Check if positions are valid
-                    if (chunk.startIndex >= chunk.endIndex) {
-                        console.log(`⚠️ Filtered out chunk: startIndex=${chunk.startIndex} >= endIndex=${chunk.endIndex} (invalid positions)`);
-                        return false;
-                    }
-                    
-                    // Check if text is completely missing
-                    if (!chunk.cleanedText) {
-                        console.log(`⚠️ Filtered out chunk: startIndex=${chunk.startIndex}, endIndex=${chunk.endIndex} (completely missing text)`);
-                        return false;
-                    }
-                    
-                    // If text is only whitespace, log warning but keep the chunk
-                    if (chunk.cleanedText.trim().length === 0) {
-                        console.log(`⚠️ WARNING: Chunk contains only whitespace - positions: ${chunk.startIndex}-${chunk.endIndex}`);
-                        // Still include it but trim the whitespace
-                        chunk.cleanedText = '';
-                    }
-                    
-                    return true;
-                })
-                .map(chunk => {
-                    // Additional position validation logging
-                    const startIndex = chunk.startIndex || 0;
-                    const endIndex = chunk.endIndex || 0;
-                    
-                    if (startIndex >= endIndex) {
-                        console.log(`⚠️ Warning: Invalid chunk positions (start=${startIndex} >= end=${endIndex})`);
-                    }
-                    
-                    if (!chunk.firstWord || !chunk.lastWord) {
-                        console.log(`⚠️ Warning: Missing boundary words for chunk ${startIndex}-${endIndex}`);
-                    }
-                    
-                    const chunkData = {
-                        document_id: document.id,
-                        document_source_id: documentSourceId,
-                        start_index: startIndex,
-                        end_index: endIndex,
-                        first_word: chunk.firstWord,
-                        last_word: chunk.lastWord,
-                        cleaned_text: (chunk.cleanedText || '').trim(),
-                        original_text: content.slice(Math.max(0, startIndex - 1), Math.min(content.length, endIndex)),
-                        warnings: Array.isArray(chunk.warnings) ? chunk.warnings.join('\n') : chunk.warnings,
-                        raw_metadata: chunk.metadata || null,
-                        created_at: new Date().toISOString(),
-                        within_tolerance: chunk.within_tolerance,
-                        position_difference: chunk.position_difference,
-                        llm_suggested_end: chunk.llm_suggested_end,
-                        actual_end: chunk.actual_end,
-                        first_word_match: chunk.first_word_match,
-                        last_word_match: chunk.last_word_match,
-                        // Add prechunk ID if available
-                        prechunk_id: chunk.prechunk_id || null,
-                        // Add token usage fields if they exist in the chunk data
-                        input_tokens: chunk.input_tokens || null,
-                        output_tokens: chunk.output_tokens || null,
-                        total_tokens: chunk.total_tokens || null,
-                        reasoning_tokens: chunk.reasoning_tokens || null,
-                        cached_tokens: chunk.cached_tokens || null
-                    };
-                    
-                    // Validate all fields
-                    Object.entries(chunkData).forEach(([key, value]) => {
-                        if (value === undefined || value === null) {
-                            console.error(`⚠️ WARNING: Field "${key}" is ${value} in chunk data`);
-                        }
-                    });
-                    
-                    return chunkData;
-                });
-
-            console.log(`After filtering/processing: ${chunksToInsert.length} chunks ready to insert`);
+            const rows = metadata.chunks.map(c => buildChunkRow(c, document.id));
             
-            if (chunksToInsert.length > 0) {
+            console.log(`After filtering/processing: ${rows.length} chunks ready to insert`);
+            
+            if (rows.length > 0) {
                 console.log(`[${timestamp}] First chunk to insert:`, {
-                    document_id: chunksToInsert[0].document_id,
-                    document_source_id: chunksToInsert[0].document_source_id,
-                    start_index: chunksToInsert[0].start_index,
-                    end_index: chunksToInsert[0].end_index,
-                    first_word: chunksToInsert[0].first_word,
-                    last_word: chunksToInsert[0].last_word,
-                    text_length: chunksToInsert[0].cleaned_text?.length || 0
+                    document_id: rows[0].document_id,
+                    document_source_id: rows[0].document_source_id,
+                    start_index: rows[0].start_index,
+                    end_index: rows[0].end_index,
+                    first_word: rows[0].first_word,
+                    last_word: rows[0].last_word,
+                    text_length: rows[0].cleaned_text?.length || 0
                 });
                 
                 try {
                     const { data, error: chunksError } = await supabase
                         .from('chunks')
-                        .insert(chunksToInsert)
+                        .insert(rows)
                         .select();
 
                     if (chunksError) {
@@ -467,7 +389,7 @@ export async function saveAnalysis(content, type, metadata = {}) {
                         console.error('Error hint:', chunksError.hint);
                         throw chunksError;
                     } else {
-                        console.log(`✅ SUCCESS: ${chunksToInsert.length} chunks saved successfully from saveAnalysis call`);
+                        console.log(`✅ SUCCESS: ${rows.length} chunks saved successfully from saveAnalysis call`);
                         if (data) {
                             console.log(`Returned data: ${data.length} rows`);
                         }
@@ -896,4 +818,20 @@ export async function checkForRecentActivity() {
     } catch (error) {
         console.error(`[${timestamp}] ❌ Error checking for recent activity:`, error);
     }
+}
+
+// Define the function to build a chunk row for database insertion
+function buildChunkRow(chunk, docId) {
+  return {
+    document_id: docId,
+    start_index: chunk.startIndex,
+    end_index: chunk.endIndex,
+    chunk_index: chunk.chunkIndex ?? null,
+    title: chunk.title ?? null,
+    cleaned_text: chunk.cleanedText ?? '',
+    first_word: (chunk.startSnippet || chunk.firstWord || chunk.firstWords || '').split(/\s+/)[0] ?? '',
+    last_word: (chunk.endSnippet || chunk.lastWord || chunk.lastWords || '').split(/\s+/).pop() ?? '',
+    start_snippet: chunk.startSnippet ?? null,
+    end_snippet: chunk.endSnippet ?? null,
+  };
 }
