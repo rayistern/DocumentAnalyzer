@@ -12,6 +12,8 @@ import { checkDocumentExists, getLastProcessedDocument } from './services/dbServ
 import { saveAnalysis } from './services/supabaseService.mjs';
 import { setupProcessTimeout } from './config.mjs';
 import fs from 'fs/promises';
+import logger from './utils/logger.mjs';
+import settings from './config/settings.mjs';
 
 dotenv.config();
 
@@ -331,11 +333,14 @@ program
     .option('--id <id>', 'exact id match')
     .option('--lt <value>', 'id less than value')
     .option('--gt <value>', 'id greater than value')
-    .option('--output-dir <dir>', 'output directory', './embeddings')
-    .option('--model <model>', 'embedding model')
-    .option('--group <group>', 'embedding group name', 'default')
-    .option('--provider <provider>', 'embedding provider', 'openai')
-    .option('--strict', 'fail if specified model is not available', false)
+    .option('-o, --output-dir <dir>', 'output directory', './embeddings')
+    .option('-g, --group <group>', 'embedding group name', 'default')
+    .option('-b, --batch <size>', 'Number of rows to process per Supabase query', settings.supabase?.defaultBatchSize || 1000)
+    .option('-p, --provider <provider>', 'Embedding provider (e.g., openai, local)', settings.embedding?.provider)
+    .option('-m, --model <model>', 'Embedding model name', settings.embedding?.model)
+    .option('--jsonb-key <key>', 'Specify a key to extract text from if the column is JSONB')
+    .option('--strict', 'Enable strict mode (fail on first error for local provider)', false)
+    .option('--task <task_name>', 'Specify the task for sentence-transformers models (e.g., "feature-extraction", "semantic-similarity")', 'feature-extraction')
     .action(async (options) => {
         try {
             const { localEmbed } = await import('./batch/localEmbed.mjs');

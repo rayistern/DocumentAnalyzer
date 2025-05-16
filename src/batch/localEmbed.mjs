@@ -14,6 +14,7 @@ export async function localEmbed(args) {
     outputDir = './embeddings',
     group = 'default',
     batch = 5, provider, model,
+    jsonbKey,
     options
   } = args;
   
@@ -63,18 +64,88 @@ export async function localEmbed(args) {
       try {
         logger.info(`⚙️ Processing row ${++globalIdx} (id: ${row.id})`);
         
-        // Ensure text is a non-empty string
-        let textToEmbed = row[column];
-        if (Array.isArray(textToEmbed)) {
-          textToEmbed = textToEmbed.join(' ');
+        
+        // ------------------------------------------------------------------
+        // 1)  Pull the raw column value
+        // ------------------------------------------------------------------
+        let textInput   = row[column];   // original value (could be string / JSON string / object / array / etc.)
+        let usedJsonKey = null;          // will hold the key we actually embedded (or null)
+
+        // ------------------------------------------------------------------
+        // 2)  If the --jsonb-key flag was supplied, drill into that key
+        // ------------------------------------------------------------------
+        if (jsonbKey) {
+          let parsedJson;
+
+          // a) If the column arrived as a string, try to parse it as JSON
+          if (typeof textInput === 'string') {
+            try {
+              parsedJson = JSON.parse(textInput);
+              logger.info(`Row ${row.id}: parsed JSON from column "${column}".`);
+            } catch (e) {
+              logger.warn(
+                `⚠️  Row ${row.id}: column "${column}" is a string but not valid JSON – cannot use --jsonb-key "${jsonbKey}". Skipping row.`
+              );
+              continue; // nothing to embed → skip
+            }
+          }
+          // b) If it’s already an object (rare, but can happen)
+          else if (typeof textInput === 'object' && textInput !== null) {
+            parsedJson = textInput;
+          }
+          // c) Anything else (number, null, etc.) cannot contain the key
+          else {
+            logger.warn(
+              `⚠️  Row ${row.id}: column "${column}" is neither JSON string nor object – cannot use --jsonb-key "${jsonbKey}". Skipping row.`
+            );
+            continue;
+          }
+
+          // We now have parsedJson → must be plain object (not array)
+          if (
+            parsedJson &&
+            typeof parsedJson === 'object' &&
+            !Array.isArray(parsedJson) &&
+            Object.prototype.hasOwnProperty.call(parsedJson, jsonbKey)
+          ) {
+            textInput   = parsedJson[jsonbKey];
+            usedJsonKey = jsonbKey;
+            logger.info(
+              `Row ${row.id}: extracted value from key "${jsonbKey}" (type: ${typeof textInput}).`
+            );
+          } else {
+            logger.warn(
+              `⚠️  Row ${row.id}: key "${jsonbKey}" not found in JSON parsed from column "${column}". Skipping row.`
+            );
+            continue;
+          }
         }
-        if (typeof textToEmbed !== 'string') {
-          textToEmbed = String(textToEmbed ?? '');
+
+        // ------------------------------------------------------------------
+        // 3)  Convert textInput → string that we can embed
+        // ------------------------------------------------------------------
+
+
+
+        // Convert textInput to a string for embedding
+        let textToEmbed;
+        if (typeof textInput === 'string') {
+          textToEmbed = textInput;
+        } else if (Array.isArray(textInput)) {
+          textToEmbed = textInput.map(item => String(item ?? '')).join(' '); 
+        } else if (typeof textInput === 'object' && textInput !== null) {
+          logger.warn(`⚠️ Row ${row.id}: Content for embedding from column "${column}" ${usedJsonKey ? `(key: "${usedJsonKey}")` : ''} is an object. Stringifying with JSON.stringify().`);
+          textToEmbed = JSON.stringify(textInput);
+        } else {
+          textToEmbed = String(textInput ?? '');
         }
+
         textToEmbed = textToEmbed.trim();
-        if (!textToEmbed) {
-          logger.warn(`⚠️ Row ${row.id} has empty or missing text in column "${column}". Skipping.`);
-          continue; // skip this row
+
+        // Check for effectively empty text after processing (e.g. empty string, "{}", "[]")
+        if (!textToEmbed || textToEmbed === '{}' || textToEmbed === '[]') {
+          logger.warn(`⚠️ Row ${row.id} has effectively empty text in column "${column}" ${usedJsonKey ? `(key: "${usedJsonKey}")` : ''} after processing. Skipping.`);
+          continue;
         }
         
         // For local provider, get both embedding and actual model used
@@ -127,6 +198,7 @@ export async function localEmbed(args) {
           source_table: table,
           source_pk: row.id,
           source_column: column,
+          source_jsonb_key: usedJsonKey,
           group,
           model: actualModel,
           provider: embeddingProvider,
@@ -162,6 +234,7 @@ export async function localEmbed(args) {
             source_table: table,
             source_pk: row.id,
             source_column: column,
+            source_jsonb_key: usedJsonKey,
             group: group,
             model: fallbackModel,
             provider: 'openai',
