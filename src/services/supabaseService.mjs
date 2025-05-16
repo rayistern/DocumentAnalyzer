@@ -5,6 +5,7 @@ import { parseJsonResponse } from '../utils/jsonUtils.mjs'
 import { calculateContentHash } from '../utils/deduplication.mjs'
 import path from 'path'
 import { setupProcessTimeout } from '../config.mjs'
+import { appendEndSnippetIfMissing } from '../utils/chunkFixUtils.mjs'
 
 dotenv.config()
 
@@ -550,7 +551,7 @@ export async function saveChunkMetadata(
   rawResponse,
   apiMetadata = {}
 ) {
-  try {
+    try {
     /* 1️⃣ Locate the chunk row (only to fetch its UUID) */
     logger.debug('[saveChunkMetadata] Locating chunk-id…', { documentId, chunkIndex });
 
@@ -620,7 +621,7 @@ export async function saveChunkMetadata(
   } catch (e) {
     logger.error('[saveChunkMetadata] Exception:', e);
     return { error: e };
-  }
+    }
 }
 
 // Add a function to check for recent database activity
@@ -695,7 +696,10 @@ function buildChunkRow(chunk, docId) {
     end_index: chunk.endIndex,
     chunk_index: chunk.chunkIndex ?? null,
     title: chunk.title ?? null,
-    cleaned_text: chunk.cleanedText ?? '',
+    cleaned_text: appendEndSnippetIfMissing(
+      chunk.cleanedText ?? '',
+      chunk.endSnippet ?? ''
+    ),
     first_word: (chunk.startSnippet || chunk.firstWord || chunk.firstWords || '').split(/\s+/)[0] ?? '',
     last_word: (chunk.endSnippet || chunk.lastWord || chunk.lastWords || '').split(/\s+/).pop() ?? '',
     start_snippet: chunk.startSnippet ?? null,

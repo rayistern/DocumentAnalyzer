@@ -199,60 +199,62 @@ function buildColumns(rows) {
     // Process inner column content
     let innerContent = '';
     if (m) {
-      const title = convertMarkdown(esc(m.generated_title || '').replace(/[\r\n]+/g, ' '));
+      // Start with the title
+      const title = m.generated_title ? 
+        convertMarkdown(esc(m.generated_title).replace(/[\r\n]+/g, ' ')) : '';
       
-      // Format quiz questions
-      let cleanQuestions = '';
-      if (m.quiz_questions && m.quiz_questions.length) {
-        cleanQuestions = `<div style="margin-top: 0.5em;"><strong>Quiz Questions:</strong>
-          <ul style="margin-top: 0.2em; margin-bottom: 0.2em;">
-            ${m.quiz_questions.map(q => `<li>${convertMarkdown(esc(q).replace(/[\r\n]+/g, ' '))}</li>`).join('')}
-          </ul>
-        </div>`;
+      // Build content sections dynamically based on available fields
+      const sections = [];
+      
+      // Handle regular text fields - ONLY include novel_approaches
+      const textFields = {
+        'novel_approaches': 'Novel Approaches',
+        'key_terms_he': 'Key Terms (Hebrew)',
+        'named_entities': 'Named Entities'
+        // Add other text fields as needed
+      };
+      
+      // Process each text field that exists
+      for (const [field, label] of Object.entries(textFields)) {
+        if (m[field] && Array.isArray(m[field]) && m[field].length > 0) {
+          const content = `<div style="margin-top: 0.5em;"><strong>${label}:</strong>
+            <ul style="margin-top: 0.2em; margin-bottom: 0.2em;">
+              ${m[field].map(item => `<li>${convertMarkdown(esc(item).replace(/[\r\n]+/g, ' '))}</li>`).join('')}
+            </ul>
+          </div>`;
+          sections.push(content);
+        }
       }
       
-      // Format follow-up thinking questions with better styling
-      let cleanFollowup = '';
-      if (m.followup_thinking_questions && m.followup_thinking_questions.length) {
-        cleanFollowup = `<div style="margin-top: 0.5em;"><strong>Follow-up Questions:</strong>
-          <ul style="margin-top: 0.2em; margin-bottom: 0.2em;">
-            ${m.followup_thinking_questions.map(q => `<li>${convertMarkdown(esc(q).replace(/[\r\n]+/g, ' '))}</li>`).join('')}
-          </ul>
-        </div>`;
-      }
-      
-      // Clean QA pairs - properly handle object vs string with markdown
+      // Handle QA pairs separately
       let qaContent = '';
       if (m.qa_pair) {
         let qaText = '';
         if (typeof m.qa_pair === 'object') {
           try {
-            // Extract Q and A and format them nicely with markdown
             const qaPair = m.qa_pair;
             const question = esc(qaPair.question || '');
             const answer = esc(qaPair.answer || '');
             
             qaText = `<strong>Question:</strong> ${convertMarkdown(question)}\n\n<strong>Answer:</strong> ${convertMarkdown(answer)}`;
           } catch (e) {
-            // Fallback to full JSON if extraction fails
             qaText = esc(JSON.stringify(m.qa_pair, null, 2));
           }
         } else {
-          // Use it as is if it's already a string, but apply markdown
           const rawText = esc(m.qa_pair);
-          // Bold "Question:" and "Answer:" patterns
           qaText = rawText.replace(/Question:/g, '<strong>Question:</strong>')
                           .replace(/Answer:/g, '<strong>Answer:</strong>');
           qaText = convertMarkdown(qaText);
         }
         
-        // Replace line breaks with spaces to keep it inline
         const cleanQaPair = qaText.replace(/[\r\n]+/g, ' ');
-        qaContent = `<div style="margin-top: 0.5em;">${cleanQaPair}</div>`;
+        qaContent = `<div style="margin-top: 0.5em;"><strong>Q&A:</strong> ${cleanQaPair}</div>`;
+        sections.push(qaContent);
       }
       
       innerContent = `<div style="margin-bottom: 1em; word-wrap: break-word; overflow-wrap: break-word; width: 100%;">
-        <strong>${title}</strong>${cleanQuestions}${cleanFollowup}${qaContent}
+        <strong>${title}</strong>
+        ${sections.join('')}
       </div>`;
     } else {
       innerContent = '<div style="margin-bottom: 1em;"><em>no metadata yet</em></div>';
@@ -263,7 +265,10 @@ function buildColumns(rows) {
     if (m) {
       const longSummary = convertMarkdown(esc(m.long_summary || '').replace(/[\r\n]+/g, ' '));
       const shortSummary = convertMarkdown(esc(m.short_summary || '').replace(/[\r\n]+/g, ' '));
-      outer.push(`<div style="margin-bottom: 1em;">${longSummary}<hr>${shortSummary}</div>`);
+      outer.push(`<div style="margin-bottom: 1em;">
+        <strong>Long Summary:</strong> ${longSummary}<hr>
+        <strong>Short Summary:</strong> ${shortSummary}
+      </div>`);
     } else {
       outer.push('<div style="margin-bottom: 1em;"></div>');
     }

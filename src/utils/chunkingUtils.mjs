@@ -113,7 +113,7 @@ export function extractChunkBySnippets_V2({ text, startSnippet, endSnippet }) {
     // eIdx_inclusiveEnd remains text.length
   }
 
-  const chunk = text.slice(sIdx, eIdx_inclusiveEnd);
+  const chunk = text.slice(sIdx, eIdx_inclusiveEnd + 1);
   logger.debug(`[extractChunkBySnippets_V2] Slicing text from ${sIdx} to ${eIdx_inclusiveEnd}.`);
   logger.debug(`[extractChunkBySnippets_V2] Resulting chunk (len ${chunk?.length}): "${chunk?.substring(0, 200).replace(/\n/g, '\\n')}..."`);
   if (chunk.length > 200) logger.debug(`  ... (chunk continues) ... "${chunk?.substring(chunk.length - 200).replace(/\n/g, '\\n')}"`);
