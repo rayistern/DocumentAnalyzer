@@ -692,27 +692,8 @@ function validateChunks(chunks, effectiveLength, originalLength) {
     return documentWarnings;
 }
 
-function findCompleteBoundary(text, position, word) {
-    // Normalize quotation marks in both the search text and word
-    const normalizeQuotes = (str) => str.replace(/[""]/g, '"').replace(/['']/g, "'");
-    
-    // Look for the word within tolerance range
-    const start = Math.max(0, position - tolerance);
-    const end = Math.min(text.length, position + tolerance);
-    // Strip diacritics from both search text and word
-    const searchText = stripDiacritics(normalizeQuotes(text.substring(start, end)));
-    const normalizedWord = stripDiacritics(normalizeQuotes(word));
-    
-    const wordIndex = searchText.indexOf(normalizedWord);
-    if (wordIndex !== -1) {
-        return start + wordIndex;
-    }
-    
-    return position;
-}
-
 /**
- * Finds the actual position of a word in text, with sophisticated matching
+ * Enhanced findWordPosition for Hebrew and other RTL languages
  * 
  * This function is critical for accurate chunk boundary detection. When the LLM 
  * provides positions, they may not exactly match the actual text. This function:
@@ -720,16 +701,7 @@ function findCompleteBoundary(text, position, word) {
  * 2. Falls back to fuzzy matching for similar words 
  * 3. Uses different strategies for start vs. end positions
  * 4. Ensures positions are valid and within text bounds
- * 
- * IMPORTANT: Works on the finalCleanedText which already includes the remainder text,
- * so all positions automatically account for remainder length.
- * 
- * @param {string} text - The text to search in (complete text with remainder prepended)
- * @param {string} targetWord - The word to find 
- * @param {number} nearPosition - Approximate position where word should be
- * @param {boolean} isStart - Whether this is a start position (vs. end)
- * @param {number} previousChunkEnd - Position of previous chunk end, if any
- * @returns {number} The best position found for the word
+ * 5. Adds special handling for RTL text and bidi control characters
  */
 function findWordPosition(text, targetWord, nearPosition, isStart, previousChunkEnd = 0) {
     /* --- helpers ----------------------------------------------------- */
@@ -741,6 +713,10 @@ function findWordPosition(text, targetWord, nearPosition, isStart, previousChunk
         .replace(/\s+/g, ' ')
         .trim();
 
+    // Special RTL marker handling
+    const removeRTLMarkers = str => str
+        .replace(/[\u200E\u200F\u202A-\u202E]/g, ''); // Remove bidi markers
+    
     /* --- validate inputs --------------------------------------------- */
     nearPosition = Number(nearPosition);
     if (!targetWord || Number.isNaN(nearPosition)) {
@@ -748,27 +724,37 @@ function findWordPosition(text, targetWord, nearPosition, isStart, previousChunk
     }
 
     /* --- set-up search window ---------------------------------------- */
-    const normalizedTarget = normalizeText(targetWord);
-    const searchStart = Math.max(0, nearPosition - tolerance);
-    const searchEnd   = Math.min(text.length, nearPosition + tolerance);
+    // Normalize and clean target word - also handle RTL markers
+    const normalizedTarget = removeRTLMarkers(normalizeText(targetWord));
+    
+    // Use larger tolerance for Hebrew/RTL text (100 instead of default)
+    const rtlTolerance = 100;
+    const searchStart = Math.max(0, nearPosition - rtlTolerance);
+    const searchEnd = Math.min(text.length, nearPosition + rtlTolerance);
     if (searchStart >= searchEnd) {
         return isStart ? previousChunkEnd : nearPosition;
     }
-    const searchArea = text.slice(searchStart, searchEnd);
-
+    
+    // Normalize search area with RTL marker handling
+    const searchArea = removeRTLMarkers(text.slice(searchStart, searchEnd));
+    
     /* --- 1. exact match ---------------------------------------------- */
     const exactIdx = normalizeSpaces(searchArea).indexOf(normalizeSpaces(targetWord));
     if (exactIdx !== -1) return searchStart + exactIdx;
 
     /* --- 2. normalised / fuzzy search -------------------------------- */
+    // Debug output for RTL character codes (helpful for debugging)
+    console.log(`[RTL-DEBUG] Target word code points: ${[...normalizedTarget].map(c => c.codePointAt(0).toString(16)).join(' ')}`);
+    
+    // Use findBestMatch helper function from the original code
     const words = searchArea.split(/\s+/);
     let best = findBestMatch(words, normalizedTarget, searchArea, searchStart);
     if (best.position !== -1) return best.position;
 
-    /* wider window */
-    const widerStart = Math.max(0, nearPosition - tolerance * 2);
-    const widerEnd   = Math.min(text.length, nearPosition + tolerance * 2);
-    const widerArea  = text.slice(widerStart, widerEnd);
+    /* wider window for RTL text */
+    const widerStart = Math.max(0, nearPosition - rtlTolerance * 2);
+    const widerEnd   = Math.min(text.length, nearPosition + rtlTolerance * 2);
+    const widerArea  = removeRTLMarkers(text.slice(widerStart, widerEnd));
     best = findBestMatch(widerArea.split(/\s+/), normalizedTarget, widerArea, widerStart);
     if (best.position !== -1) return best.position;
 

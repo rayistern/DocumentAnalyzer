@@ -122,6 +122,41 @@ export function extractChunkBySnippets_V2({ text, startSnippet, endSnippet }) {
   return chunk;
 }
 
+/**
+ * Improved version specifically for Hebrew text
+ */
+export function extractChunkBySnippets_V3({ text, startSnippet, endSnippet }) {
+    logger.debug(`[extractChunkBySnippets_V3] Processing Hebrew text...`);
+    
+    // Special normalization for Hebrew text
+    const hebrewNorm = (s) => {
+        if (typeof s !== 'string') return s;
+        return s
+            .normalize('NFC')
+            .replace(/[\u200E\u200F\u202A-\u202E]/g, '') // Remove bidi control chars
+            .replace(/[\"״׳׳"״׳׳"]/g, '"')      // Normalize Hebrew quotes
+            .replace(/[\u0591-\u05BD\u05BF-\u05C7]/g, '') // Remove Hebrew diacritics
+            .replace(/\s+/g, ' ')               // Collapse whitespace
+            .trim();
+    };
+    
+    // First try exact match
+    let exactMatch = extractChunkBySnippets_V2({ text, startSnippet, endSnippet });
+    if (exactMatch) return exactMatch;
+    
+    // If exact match fails, try with Hebrew normalization
+    logger.debug(`[extractChunkBySnippets_V3] Exact match failed, trying Hebrew normalization...`);
+    const normalizedText = hebrewNorm(text);
+    const normalizedStart = hebrewNorm(startSnippet);
+    const normalizedEnd = endSnippet ? hebrewNorm(endSnippet) : null;
+    
+    return extractChunkBySnippets_V2({ 
+        text: normalizedText, 
+        startSnippet: normalizedStart, 
+        endSnippet: normalizedEnd 
+    });
+}
+
 // ---------------------------------------------------------------------------
 //  (anything that was already in this file continues unchanged below…)
 // --------------------------------------------------------------------------- 

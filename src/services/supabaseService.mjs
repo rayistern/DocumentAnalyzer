@@ -538,238 +538,68 @@ export async function saveCleanedDocument(documentId, cleanedText, originalText,
     }
 }
 
-export async function saveChunkMetadata(
-  documentId,
-  chunkIndex,
-  metadata,
-  chunkId        // ← NEW param
-  , modelUsed    = null,
-  rawLLMResponse = null,
-  apiMetadata    = null
-) {
+/**
+ * Saves metadata for a chunk
+ * 
+ * @param {string} documentId - The document ID
+ * @param {number} chunkIndex - The index of the chunk
+ * @param {object} metadata - The metadata object
+ * @param {string} model - The model used to generate metadata
+ * @param {string} rawResponse - The raw LLM response
+ * @param {object} apiMetadata - Additional API metadata
+ * @returns {Promise} - A promise that resolves when the metadata is saved
+ */
+export async function saveChunkMetadata(documentId, chunkIndex, metadata, model, rawResponse, apiMetadata = {}) {
     try {
-        console.log(`Saving metadata for document ${documentId}, chunk ${chunkIndex}...`);
-        
-        // Log the raw metadata for debugging
-        console.log(`Raw metadata for chunk ${chunkIndex}:`, JSON.stringify(metadata).substring(0, 200) + '...');
-        
-        // Log the model used if provided
-        if (modelUsed) {
-            console.log(`Model used for metadata: ${modelUsed}`);
-        }
-        
-        // Log if we have raw LLM response
-        if (rawLLMResponse) {
-            console.log(`Raw LLM response saved for chunk ${chunkIndex}: ${rawLLMResponse.length} characters`);
-        }
-        
-        // Fix any structure issues with qa_pair (fields incorrectly nested inside qa_pair)
-        if (metadata.qa_pair && typeof metadata.qa_pair === 'object') {
-            const { question, answer, potential_typos, identified_abbreviations, named_entities, novel_approaches, ...otherProps } = metadata.qa_pair;
+        // First find the actual chunk ID using document ID and chunk index
+        const { data: chunks, error: chunkError } = await supabase
+            .from('chunks')
+            .select('id')
+            .eq('document_id', documentId)
+            .order('id', { ascending: true });
             
-            // Check if any fields that should be at root level are in qa_pair
-            if (potential_typos || identified_abbreviations || named_entities || novel_approaches) {
-                console.log(`[METADATA-REPAIR] Found fields incorrectly nested in qa_pair for chunk ${chunkIndex}`);
-                
-                // Move fields to root level
-                if (potential_typos && !metadata.potential_typos) {
-                    metadata.potential_typos = potential_typos;
-                }
-                if (identified_abbreviations && !metadata.identified_abbreviations) {
-                    metadata.identified_abbreviations = identified_abbreviations;
-                }
-                if (named_entities && !metadata.named_entities) {
-                    metadata.named_entities = named_entities;
-                }
-                if (novel_approaches && !metadata.novel_approaches) {
-                    metadata.novel_approaches = novel_approaches;
-                }
-                
-                // Clean qa_pair to only include question and answer
-                metadata.qa_pair = { question, answer };
-                console.log(`[METADATA-REPAIR] Fixed qa_pair structure for chunk ${chunkIndex}`);
-            }
+        if (chunkError) {
+            console.error(`Error finding chunk for metadata: ${chunkError.message}`);
+            return;
         }
         
-        // Map LLM response fields to database fields if needed
-        const mappedMetadata = {
-            long_summary: metadata.long_summary || metadata.longSummary,
-            short_summary: metadata.short_summary || metadata.shortSummary,
-            quiz_questions: metadata.quiz_questions || metadata.quizQuestions,
-            followup_thinking_questions: metadata.followup_thinking_questions || metadata.followupThinkingQuestions,
-            generated_title: metadata.generated_title || metadata.generatedTitle,
-            tags_he: metadata.tags_he || metadata.tagsHe,
-            key_terms_he: metadata.key_terms_he || metadata.keyTermsHe,
-            key_phrases_he: metadata.key_phrases_he || metadata.keyPhrasesHe,
-            key_phrases_en: metadata.key_phrases_en || metadata.keyPhrasesEn,
-            bibliography_snippets: metadata.bibliography_snippets || metadata.bibliographySnippets,
-            // Skip problematic fields
-            questions_explicit: metadata.questions_explicit || metadata.questionsExplicit,
-            questions_implied: metadata.questions_implied || metadata.questionsImplied,
-            reconciled_issues: metadata.reconciled_issues || metadata.reconciledIssues,
-            qa_pair: metadata.qa_pair || metadata.qaPair,
-            potential_typos: metadata.potential_typos || metadata.potentialTypos,
-            identified_abbreviations: metadata.identified_abbreviations || metadata.identifiedAbbreviations,
-            named_entities: metadata.named_entities || metadata.namedEntities,
-            novel_approaches: metadata.novel_approaches || metadata.novelApproaches
-        };
-        
-        console.log(`Mapped metadata fields for chunk ${chunkIndex}`);
-        
-        // Special handling for qa_pair to ensure it's properly formatted
-        let qa_pair_value = null;
-        if (mappedMetadata.qa_pair) {
-            try {
-                // First clean any control characters in the qa_pair
-                let cleanedQaPair = mappedMetadata.qa_pair;
-                
-                // If it's a string, clean it directly
-                if (typeof cleanedQaPair === 'string') {
-                    cleanedQaPair = cleanedQaPair
-                        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ' ') // Control chars
-                        .replace(/\\u00([01][0-9A-Fa-f])/g, ' '); // Escaped control chars
-                } 
-                // If it's an object, clean the question and answer fields
-                else if (typeof cleanedQaPair === 'object') {
-                    if (cleanedQaPair.question) {
-                        cleanedQaPair.question = cleanedQaPair.question
-                            .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ' ')
-                            .replace(/\\u00([01][0-9A-Fa-f])/g, ' ');
-                    }
-                    if (cleanedQaPair.answer) {
-                        cleanedQaPair.answer = cleanedQaPair.answer
-                            .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ' ')
-                            .replace(/\\u00([01][0-9A-Fa-f])/g, ' ');
-                    }
-                }
-                
-                // Now process it normally
-                if (typeof cleanedQaPair === 'string') {
-                    // If it's already a string, parse it to validate and then re-stringify
-                    const parsed = JSON.parse(cleanedQaPair);
-                    qa_pair_value = JSON.stringify(parsed);
-                } else {
-                    // If it's an object, stringify it directly
-                    qa_pair_value = JSON.stringify(cleanedQaPair);
-                }
-                console.log(`Formatted qa_pair for chunk ${chunkIndex}: ${qa_pair_value.substring(0, 100)}...`);
-            } catch (jsonError) {
-                console.error(`Error formatting qa_pair for chunk ${chunkIndex}:`, jsonError);
-                
-                // Fallback: try a more aggressive cleaning approach
-                try {
-                    console.log(`Attempting aggressive qa_pair recovery for chunk ${chunkIndex}`);
-                    // If we have an object with question and answer, create a clean version
-                    if (typeof mappedMetadata.qa_pair === 'object' && 
-                        mappedMetadata.qa_pair.question && 
-                        mappedMetadata.qa_pair.answer) {
-                        
-                        const cleanQuestion = mappedMetadata.qa_pair.question
-                            .replace(/[\x00-\x1F]/g, ' ') // Strip ALL control chars
-                            .replace(/\\u[0-9a-fA-F]{4}/g, ' '); // Strip all unicode escapes
-                            
-                        const cleanAnswer = mappedMetadata.qa_pair.answer
-                            .replace(/[\x00-\x1F]/g, ' ') // Strip ALL control chars
-                            .replace(/\\u[0-9a-fA-F]{4}/g, ' '); // Strip all unicode escapes
-                        
-                        // Create a clean object and stringify it
-                        qa_pair_value = JSON.stringify({
-                            question: cleanQuestion,
-                            answer: cleanAnswer
-                        });
-                        
-                        console.log(`Recovered qa_pair through aggressive cleaning for chunk ${chunkIndex}`);
-                    } else {
-                        qa_pair_value = null;
-                    }
-                } catch (fallbackError) {
-                    console.error(`Final qa_pair recovery failed for chunk ${chunkIndex}:`, fallbackError);
-                    qa_pair_value = null;
-                }
-            }
+        if (!chunks || chunks.length === 0) {
+            console.error(`No chunks found for document ${documentId}`);
+            return;
         }
         
-        // Convert arrays to Postgres format
-        const formattedMetadata = {
-            chunk_id: chunkId,          // ★ new field
-            document_id: documentId,
-            chunk_index: chunkIndex,
-            long_summary: mappedMetadata.long_summary,
-            short_summary: mappedMetadata.short_summary,
-            quiz_questions: Array.isArray(mappedMetadata.quiz_questions) ? `{${mappedMetadata.quiz_questions.map(q => typeof q === 'string' ? `"${q.replace(/"/g, '\\"')}"` : `"${String(q)}"`).join(',')}}` : null,
-            followup_thinking_questions: Array.isArray(mappedMetadata.followup_thinking_questions) ? `{${mappedMetadata.followup_thinking_questions.map(q => typeof q === 'string' ? `"${q.replace(/"/g, '\\"')}"` : `"${String(q)}"`).join(',')}}` : null,
-            generated_title: mappedMetadata.generated_title,
-            tags_he: Array.isArray(mappedMetadata.tags_he) ? `{${mappedMetadata.tags_he.map(t => typeof t === 'string' ? `"${t.replace(/"/g, '\\"')}"` : `"${String(t)}"`).join(',')}}` : null,
-            key_terms_he: Array.isArray(mappedMetadata.key_terms_he) ? `{${mappedMetadata.key_terms_he.map(t => typeof t === 'string' ? `"${t.replace(/"/g, '\\"')}"` : `"${String(t)}"`).join(',')}}` : null,
-            key_phrases_he: Array.isArray(mappedMetadata.key_phrases_he) ? `{${mappedMetadata.key_phrases_he.map(p => typeof p === 'string' ? `"${p.replace(/"/g, '\\"')}"` : `"${String(p)}"`).join(',')}}` : null,
-            key_phrases_en: Array.isArray(mappedMetadata.key_phrases_en) ? `{${mappedMetadata.key_phrases_en.map(p => typeof p === 'string' ? `"${p.replace(/"/g, '\\"')}"` : `"${String(p)}"`).join(',')}}` : null,
-            bibliography_snippets_jsonb: Array.isArray(mappedMetadata.bibliography_snippets) && mappedMetadata.bibliography_snippets.length > 0 ? 
-                mappedMetadata.bibliography_snippets // Pass as direct object for JSONB
-                : null,
-            // Skip problematic fields
-            questions_explicit: Array.isArray(mappedMetadata.questions_explicit) ? `{${mappedMetadata.questions_explicit.map(q => typeof q === 'string' ? `"${q.replace(/"/g, '\\"')}"` : `"${String(q)}"`).join(',')}}` : null,
-            questions_implied: Array.isArray(mappedMetadata.questions_implied) ? `{${mappedMetadata.questions_implied.map(q => typeof q === 'string' ? `"${q.replace(/"/g, '\\"')}"` : `"${String(q)}"`).join(',')}}` : null,
-            reconciled_issues: Array.isArray(mappedMetadata.reconciled_issues) ? `{${mappedMetadata.reconciled_issues.map(i => typeof i === 'string' ? `"${i.replace(/"/g, '\\"')}"` : `"${String(i)}"`).join(',')}}` : null,
-            qa_pair: qa_pair_value,
-            potential_typos: Array.isArray(mappedMetadata.potential_typos) ? `{${mappedMetadata.potential_typos.map(t => typeof t === 'string' ? `"${t.replace(/"/g, '\\"')}"` : `"${String(t)}"`).join(',')}}` : null,
-            identified_abbreviations_jsonb: Array.isArray(mappedMetadata.identified_abbreviations) && mappedMetadata.identified_abbreviations.length > 0 ? 
-                mappedMetadata.identified_abbreviations // Pass as direct object for JSONB
-                : null,
-            named_entities: Array.isArray(mappedMetadata.named_entities) ? `{${mappedMetadata.named_entities.map(e => typeof e === 'string' ? `"${e.replace(/"/g, '\\"')}"` : `"${String(e)}"`).join(',')}}` : null,
-            novel_approaches: Array.isArray(mappedMetadata.novel_approaches) ? `{${mappedMetadata.novel_approaches.map(a => typeof a === 'string' ? `"${a.replace(/"/g, '\\"')}"` : `"${String(a)}"`).join(',')}}` : null,
-            created_at: new Date().toISOString(),
-            model_used: modelUsed,
-            raw_llm_response: rawLLMResponse,
-            input_tokens: apiMetadata?.usage?.prompt_tokens || null,
-            output_tokens: apiMetadata?.usage?.completion_tokens || null,
-            total_tokens: apiMetadata?.usage?.total_tokens || null,
-            reasoning_tokens: apiMetadata?.usage?.completion_tokens_details?.reasoning_tokens || null,
-            cached_tokens: apiMetadata?.usage?.prompt_tokens_details?.cached_tokens || null
-        };
-
-        // Log metadata fields before saving
-        console.log(`Preparing to save metadata for chunk ${chunkIndex} with fields:`, 
-            Object.keys(formattedMetadata).filter(k => formattedMetadata[k] !== null).join(', '));
-
-        // Add extra debugging for JSONB fields
-        if (formattedMetadata.bibliography_snippets_jsonb) {
-            console.log(`bibliography_snippets_jsonb format check:`, {
-                isArray: Array.isArray(formattedMetadata.bibliography_snippets_jsonb),
-                value: JSON.stringify(formattedMetadata.bibliography_snippets_jsonb).substring(0, 100) + '...',
-                sample: formattedMetadata.bibliography_snippets_jsonb[0]
-            });
+        // Get the chunk at the specified index, or the last chunk if index is too large
+        const chunk = chunks[Math.min(chunkIndex, chunks.length - 1)];
+        
+        if (!chunk) {
+            console.error(`Chunk at index ${chunkIndex} not found for document ${documentId}`);
+            return;
         }
         
-        if (formattedMetadata.identified_abbreviations_jsonb) {
-            console.log(`identified_abbreviations_jsonb format check:`, {
-                isArray: Array.isArray(formattedMetadata.identified_abbreviations_jsonb),
-                value: JSON.stringify(formattedMetadata.identified_abbreviations_jsonb).substring(0, 100) + '...',
-                sample: formattedMetadata.identified_abbreviations_jsonb[0]
-            });
+        // Now update the chunk with metadata
+        const { error: updateError } = await supabase
+            .from('chunks')
+            .update({
+                metadata: metadata,
+                raw_metadata: rawResponse,
+                metadata_model: model,
+                api_metadata: apiMetadata,
+                updated_at: new Date().toISOString(),
+                // Add any new token usage fields if they exist in apiMetadata
+                metadata_input_tokens: apiMetadata?.usage?.prompt_tokens || null,
+                metadata_output_tokens: apiMetadata?.usage?.completion_tokens || null,
+                metadata_total_tokens: apiMetadata?.usage?.total_tokens || null
+            })
+            .eq('id', chunk.id);
+            
+        if (updateError) {
+            console.error(`Error saving chunk metadata: ${updateError.message}`);
+            return;
         }
-
-        // If caller did not provide it, look it up once:
-        if (!chunkId) {
-            const { data, error } = await supabase
-                .from('chunks')
-                .select('id')
-                .eq('document_id', documentId)
-                .eq('chunk_index', chunkIndex)
-                .maybeSingle();
-
-            if (error) throw error;
-            chunkId = data?.id;
-        }
-
-        formattedMetadata.chunk_id = chunkId;          // ★ new field
-
-        await supabase.from('chunk_metadata').upsert(formattedMetadata);
-
-        console.log(`Successfully saved metadata for chunk ${chunkIndex}`);
+        
+        console.log(`Successfully saved metadata for chunk ${chunk.id}`);
     } catch (error) {
-        console.error('Database error:', error.message);
-        console.error('Full error:', JSON.stringify(error, null, 2));
-        throw error;
+        console.error(`Exception in saveChunkMetadata: ${error.message}`);
     }
 }
 
