@@ -204,8 +204,8 @@ function buildColumns(rows) {
       isFirstChunk = false;
     }
     
-    // Reduce spacing to approximately one line and force LTR for left column
-    main.push(`<div dir="ltr" style="margin-bottom: 1em; padding-bottom: 0.5em;">${displayText}</div>`);
+    // Reduce spacing to approximately one line and force RTL for center column
+    main.push(`<div dir="rtl" style="margin-bottom: 1em; padding-bottom: 0.5em;">${displayText}</div>`);
     
     // Process inner column content
     let innerContent = '';

@@ -2104,3 +2104,42 @@ export async function getOpenAIEmbedding(text, model = OPENAI_SETTINGS.embedding
 
 // Slice by Unicode-code-point with inclusive end index
 const cpSlice = (str, start, endInc) => Array.from(str).slice(start, endInc + 1).join('');
+
+// --- ✨ NEW HELPERS ---------------------------------------------------------
+/**
+ * Very small Levenshtein implementation (O(n*m), good enough for ≤200 chars)
+ */
+function levenshtein(a, b) {
+  const al = a.length, bl = b.length;
+  if (!al) return bl;
+  if (!bl) return al;
+  const matrix = Array.from({ length: al + 1 }, (_, i) => [i]);
+  for (let j = 1; j <= bl; j++) matrix[0][j] = j;
+  for (let i = 1; i <= al; i++) {
+    for (let j = 1; j <= bl; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,          // deletion
+        matrix[i][j - 1] + 1,          // insertion
+        matrix[i - 1][j - 1] + cost    // substitution
+      );
+    }
+  }
+  return matrix[al][bl];
+}
+
+/**
+ * Fuzzy search for snippet inside text starting at fromIdx.
+ * Returns index or -1.
+ */
+function fuzzyIndexOf(text, snippet, fromIdx = 0, maxDistance = 5, scanWindow = 1000) {
+  const windowEnd = Math.min(text.length, fromIdx + scanWindow);
+  const sLen = snippet.length;
+  for (let i = fromIdx; i <= windowEnd - sLen; i++) {
+    if (levenshtein(text.slice(i, i + sLen), snippet) <= maxDistance) {
+      return i;
+    }
+  }
+  return -1;
+}
+// ---------------------------------------------------------------------------

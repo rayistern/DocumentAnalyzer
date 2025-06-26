@@ -116,12 +116,41 @@ program
             
             const files = await glob(pattern);
             
+            // Custom numeric sort function for proper file ordering (1101-1, 1101-2, etc.)
+            const numericSort = (a, b) => {
+                // Extract filename without path
+                const nameA = path.basename(a);
+                const nameB = path.basename(b);
+                
+                // Split by common separators and compare parts numerically when possible
+                const partsA = nameA.split(/[-._]/);
+                const partsB = nameB.split(/[-._]/);
+                
+                for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
+                    const partA = partsA[i] || '';
+                    const partB = partsB[i] || '';
+                    
+                    // If both parts are numeric, compare numerically
+                    const numA = parseInt(partA);
+                    const numB = parseInt(partB);
+                    
+                    if (!isNaN(numA) && !isNaN(numB)) {
+                        if (numA !== numB) return numA - numB;
+                    } else {
+                        // Otherwise compare lexicographically
+                        if (partA !== partB) return partA.localeCompare(partB);
+                    }
+                }
+                
+                return 0;
+            };
+
             // Sort files based on the reverse flag
             if (options.reverse) {
-                files.sort().reverse(); // Sort and then reverse for descending order
+                files.sort(numericSort).reverse(); // Sort and then reverse for descending order
                 console.log('Processing files in reverse order');
             } else {
-                files.sort(); // Sort files in ascending order
+                files.sort(numericSort); // Sort files in ascending numeric order
             }
             console.log(`Found ${files.length} files matching pattern`);
 
