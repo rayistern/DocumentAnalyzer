@@ -1382,14 +1382,11 @@ async function cleanAndChunkDocument(
                   // Sanity check: Log the base text again, right before using it for snippet extraction
                   logger.debug(`  Base text for snippet extraction (len ${finalCleanedText?.length}): "${finalCleanedText?.substring(0, 100).replace(/\n/g, '\\n')}..."`);
 
-                  if (typeof startIndex === 'number' && typeof endIndex === 'number' && startIndex < endIndex && endIndex <= finalCleanedText.length) {
-                    logger.info(`[openaiService] Chunk "${title}": Using INDEX-BASED strategy (LLM indices: ${startIndex}-${endIndex}).`);
-                    actualChunkContent = finalCleanedText.slice(startIndex, endIndex);
-                    sIdxForDb = startIndex;
-                    eIdxForDb = endIndex;
-                    logger.debug(`  Index-based slice (len ${actualChunkContent?.length}): "${actualChunkContent?.substring(0,100).replace(/\n/g, '\\n')}..."`);
-                  } else if (startSnippet) {
-                    logger.info(`[openaiService] Chunk "${title}": Using SNIPPET-BASED strategy.`);
+                  const boundaryStyle = process.env.CHUNK_BOUNDARY_STYLE || 'indices';
+
+                  // OPTION B: Prioritize snippets when boundary-style is 'text', regardless of whether indices exist
+                  if (startSnippet && boundaryStyle === 'text') {
+                    logger.info(`[openaiService] Chunk "${title}": Using SNIPPET-BASED strategy (boundary-style=text).`);
                     actualChunkContent = extractChunkBySnippets_V2({
                       text: finalCleanedText, // Crucial: This must be the full text the snippets refer to
                       startSnippet: startSnippet,
@@ -1397,10 +1394,44 @@ async function cleanAndChunkDocument(
                     });
 
                     if (actualChunkContent && actualChunkContent.length > 0) {
-                      // Now, find this extracted content within the original finalCleanedText to get DB indices
+                      // Calculate indices ONLY for database storage
                       sIdxForDb = finalCleanedText.indexOf(actualChunkContent);
                       if (sIdxForDb !== -1) {
-                        eIdxForDb = sIdxForDb + actualChunkContent.length;
+                        eIdxForDb = sIdxForDb + actualChunkContent.length - 1; // Make it inclusive for DB
+                        logger.debug(`[openaiService] Snippet strategy for "${title}" SUCCESS.`);
+                        logger.debug(`  ┣━ Derived DB indices: ${sIdxForDb}-${eIdxForDb}.`);
+                        logger.debug(`  ┣━ Actual chunk content len: ${actualChunkContent.length}`);
+                        logger.debug(`  ┗━ Content: "${actualChunkContent.substring(0, 200).replace(/\n/g, '\\n')}..."`);
+                        if (actualChunkContent.length > 200) logger.debug(`    ... (content continues) ... "${actualChunkContent.substring(actualChunkContent.length - 200).replace(/\n/g, '\\n')}"`);
+                      } else {
+                        logger.error(`[openaiService] CRITICAL for "${title}": Snippet-extracted chunk NOT FOUND in base finalCleanedText. This is unexpected and indicates a mismatch.`);
+                        logger.error(`  ┣━ Snippet-extracted chunk (len ${actualChunkContent?.length}): "${actualChunkContent?.substring(0, 200).replace(/\n/g, '\\n')}..."`);
+                        logger.error(`  ┗━ Base finalCleanedText started with: "${finalCleanedText?.substring(0, Math.min(250, actualChunkContent?.length || 250)).replace(/\n/g, '\\n')}..."`);
+                        actualChunkContent = null; // Mark as failed to prevent saving bad data
+                      }
+                    } else {
+                      logger.warn(`[openaiService] Snippet strategy for "${title}" FAILED: extractChunkBySnippets_V2 returned null or empty string.`);
+                      actualChunkContent = null;
+                    }
+                  } else if (typeof startIndex === 'number' && typeof endIndex === 'number' && startIndex < endIndex && endIndex <= finalCleanedText.length) {
+                    logger.info(`[openaiService] Chunk "${title}": Using INDEX-BASED strategy (LLM indices: ${startIndex}-${endIndex}).`);
+                    actualChunkContent = finalCleanedText.slice(startIndex, endIndex);
+                    sIdxForDb = startIndex;
+                    eIdxForDb = endIndex;
+                    logger.debug(`  Index-based slice (len ${actualChunkContent?.length}): "${actualChunkContent?.substring(0,100).replace(/\n/g, '\\n')}..."`);
+                  } else if (startSnippet) {
+                    logger.info(`[openaiService] Chunk "${title}": Using SNIPPET-BASED strategy (fallback).`);
+                    actualChunkContent = extractChunkBySnippets_V2({
+                      text: finalCleanedText, // Crucial: This must be the full text the snippets refer to
+                      startSnippet: startSnippet,
+                      endSnippet: endSnippet,
+                    });
+
+                    if (actualChunkContent && actualChunkContent.length > 0) {
+                      // Calculate indices ONLY for database storage
+                      sIdxForDb = finalCleanedText.indexOf(actualChunkContent);
+                      if (sIdxForDb !== -1) {
+                        eIdxForDb = sIdxForDb + actualChunkContent.length - 1; // Make it inclusive for DB
                         logger.debug(`[openaiService] Snippet strategy for "${title}" SUCCESS.`);
                         logger.debug(`  ┣━ Derived DB indices: ${sIdxForDb}-${eIdxForDb}.`);
                         logger.debug(`  ┣━ Actual chunk content len: ${actualChunkContent.length}`);
@@ -1422,14 +1453,6 @@ async function cleanAndChunkDocument(
                   }
 
                   if (actualChunkContent && sIdxForDb !== -1 && eIdxForDb !== -1) {
-                    // Add to a list for DB, e.g.:
-                    // finalChunksForDb.push({
-                    //   title: title,
-                    //   cleanedText: actualChunkContent,
-                    //   startIndex: sIdxForDb,
-                    //   endIndex: eIdxForDb,
-                    //   // ... other rawChunk fields like firstWord, lastWord ...
-                    // });
                     logger.info(`[openaiService] Chunk "${title}" processed successfully. Length: ${actualChunkContent.length}, Indices: ${sIdxForDb}-${eIdxForDb}`);
                   } else {
                     logger.warn(`[openaiService] Chunk "${title}" could not be processed or resulted in empty content.`);

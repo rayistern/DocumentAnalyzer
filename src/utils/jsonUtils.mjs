@@ -685,10 +685,12 @@ export function parseJsonResponse(jsonResponseText, cleanedText = null, schemaTy
         if (schemaType === 'chunk' && Array.isArray(parsed.chunks) && cleanedText) {
             const processedChunks = [];
             let currentSearchStartPos = 0; // Where to begin searching for the *next* startSnippet
+            const boundaryStyle = process.env.CHUNK_BOUNDARY_STYLE || 'indices';
 
             for (const chunk of parsed.chunks) {
-                // Process only if indices are missing and snippets are present
-                if (chunk.startIndex == null && chunk.startSnippet && chunk.endSnippet) {
+                // Only convert snippets to indices if boundary-style is NOT 'text'
+                // When boundary-style is 'text', preserve original snippets for processing layer
+                if (boundaryStyle !== 'text' && chunk.startIndex == null && chunk.startSnippet && chunk.endSnippet) {
                     const sIdx = cleanedText.indexOf(chunk.startSnippet, currentSearchStartPos);
 
                     if (sIdx === -1) {
@@ -764,10 +766,11 @@ export function parseJsonResponse(jsonResponseText, cleanedText = null, schemaTy
                 if (schemaType === 'chunk' && Array.isArray(parsed.chunks) && cleanedText) {
                     const processedChunks = [];
                     let currentSearchStartPos = 0; // Where to begin searching for the *next* startSnippet
+                    const boundaryStyle = process.env.CHUNK_BOUNDARY_STYLE || 'indices';
 
                     for (const chunk of parsed.chunks) {
-                        // Process only if indices are missing and snippets are present
-                        if (chunk.startIndex == null && chunk.startSnippet && chunk.endSnippet) {
+                        // Only convert snippets to indices if boundary-style is NOT 'text'
+                        if (boundaryStyle !== 'text' && chunk.startIndex == null && chunk.startSnippet && chunk.endSnippet) {
                             const sIdx = cleanedText.indexOf(chunk.startSnippet, currentSearchStartPos);
 
                             if (sIdx === -1) {
@@ -840,10 +843,11 @@ export function parseJsonResponse(jsonResponseText, cleanedText = null, schemaTy
                     if (schemaType === 'chunk' && Array.isArray(parsed.chunks) && cleanedText) {
                         const processedChunks = [];
                         let currentSearchStartPos = 0; // Where to begin searching for the *next* startSnippet
+                        const boundaryStyle = process.env.CHUNK_BOUNDARY_STYLE || 'indices';
 
                         for (const chunk of parsed.chunks) {
-                            // Process only if indices are missing and snippets are present
-                            if (chunk.startIndex == null && chunk.startSnippet && chunk.endSnippet) {
+                            // Only convert snippets to indices if boundary-style is NOT 'text'
+                            if (boundaryStyle !== 'text' && chunk.startIndex == null && chunk.startSnippet && chunk.endSnippet) {
                                 const sIdx = cleanedText.indexOf(chunk.startSnippet, currentSearchStartPos);
 
                                 if (sIdx === -1) {
