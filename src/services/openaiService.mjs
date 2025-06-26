@@ -1130,7 +1130,7 @@ async function cleanAndChunkDocument(
         
         let cleanResult;
         try {
-            cleanResult = parseJsonResponse(cleanResponse.choices[0].message.content, 'textRemoval');
+            cleanResult = parseJsonResponse(cleanResponse.choices[0].message.content, null, 'textRemoval');
         } catch (parseError) {
             console.warn('Failed to parse LLM response as JSON, storing raw response:', parseError.message);
             const { error: rawError } = await supabase
@@ -1501,90 +1501,123 @@ async function cleanAndChunkDocument(
             parsedResponse.chunks = parsedResponse.chunks.map((chunk, index) => {
                 console.log(`\nChunk ${index + 1}:`);
                 console.log(`Original: Start: ${chunk.startIndex}, End: ${chunk.endIndex}`);
-                console.log(`After offset adjustment: Start: ${chunk.startIndex + cumulativeOffset}, End: ${chunk.endIndex + cumulativeOffset}`);
+                
+                // Check if we're using snippet-based chunking (startIndex/endIndex are undefined)
+                const isSnippetBased = chunk.startIndex === undefined || chunk.endIndex === undefined;
+                
+                if (isSnippetBased) {
+                    console.log(`\n======== SNIPPET-BASED CHUNK ${index + 1} ========`);
+                    console.log("Using snippet-based positioning - word boundary detection skipped");
+                    console.log(`- Chunk already processed with startSnippet: "${chunk.startSnippet}"`);
+                    console.log(`- Chunk already processed with endSnippet: "${chunk.endSnippet}"`);
+                    console.log(`- Chunk content length: ${chunk.cleanedText?.length || 0}`);
+                    
+                    // For snippet-based chunks, the cleanedText and positions are already set correctly
+                    // We just need to extract the DB indices from the existing content
+                    const startIdxForDb = chunk.startIndex || 0;
+                    const endIdxForDb = chunk.endIndex || (chunk.cleanedText?.length - 1) || 0;
+                    
+                    console.log(`- Database indices: ${startIdxForDb}-${endIdxForDb}`);
+                    console.log('======== END SNIPPET-BASED CHUNK ========');
+                    
+                    // Update previousAdjustedEnd for the next iteration
+                    previousAdjustedEnd = endIdxForDb;
+                    previousEndSnippetTxt = chunk.endSnippet ?? '';
+                    
+                    return {
+                        ...chunk,
+                        startIndex: startIdxForDb,
+                        endIndex: endIdxForDb,
+                        // Keep the existing cleanedText from snippet extraction
+                        cleanedText: chunk.cleanedText,
+                        startSnippet: chunk.startSnippet,
+                        endSnippet: chunk.endSnippet
+                    };
+                } else {
+                    // Original word boundary detection logic for index-based chunks
+                    console.log(`After offset adjustment: Start: ${chunk.startIndex + cumulativeOffset}, End: ${chunk.endIndex + cumulativeOffset}`);
 
-                console.log(`\n======== WORD BOUNDARY DETECTION - CHUNK ${index + 1} ========`);
-                console.log("Finding exact word boundaries for precise chunking:");
-                console.log(`- First word to find: "${chunk.startSnippet}"`);
-                console.log(`- Last word to find: "${chunk.endSnippet}"`);
-                console.log(`- Starting search at positions: ${chunk.startIndex + cumulativeOffset}-${chunk.endIndex + cumulativeOffset}`);
+                    console.log(`\n======== WORD BOUNDARY DETECTION - CHUNK ${index + 1} ========`);
+                    console.log("Finding exact word boundaries for precise chunking:");
+                    console.log(`- First word to find: "${chunk.startSnippet}"`);
+                    console.log(`- Last word to find: "${chunk.endSnippet}"`);
+                    console.log(`- Starting search at positions: ${chunk.startIndex + cumulativeOffset}-${chunk.endIndex + cumulativeOffset}`);
 
-                let alignedStartIdx = findWordPosition(
-                    finalCleanedText,
-                    chunk.startSnippet,
-                    chunk.startIndex + cumulativeOffset,
-                    true, // isStart
-                    previousAdjustedEnd // Pass the end of the previous chunk
-                );
+                    let alignedStartIdx = findWordPosition(
+                        finalCleanedText,
+                        chunk.startSnippet,
+                        chunk.startIndex + cumulativeOffset,
+                        true, // isStart
+                        previousAdjustedEnd // Pass the end of the previous chunk
+                    );
 
-                // --- 1️⃣  keep chunks contiguous (old logic) ----------
-                if (index > 0 && alignedStartIdx > previousAdjustedEnd + 1) {
-                    const oldAlignedStartIdx = alignedStartIdx;
-                    alignedStartIdx = previousAdjustedEnd + 1;
-                    logger.warn(`[CONTIGUOUS_CHUNK_FIX] Chunk ${index + 1} start index adjusted to be contiguous. Was: ${oldAlignedStartIdx}, Now: ${alignedStartIdx}. Previous chunk ended at: ${previousAdjustedEnd}`);
+                    // --- 1️⃣  keep chunks contiguous (old logic) ----------
+                    if (index > 0 && alignedStartIdx > previousAdjustedEnd + 1) {
+                        const oldAlignedStartIdx = alignedStartIdx;
+                        alignedStartIdx = previousAdjustedEnd + 1;
+                        logger.warn(`[CONTIGUOUS_CHUNK_FIX] Chunk ${index + 1} start index adjusted to be contiguous. Was: ${oldAlignedStartIdx}, Now: ${alignedStartIdx}. Previous chunk ended at: ${previousAdjustedEnd}`);
+                    }
+                    // --- 2️⃣  NEW start-shift to drop overlap ------------
+                    const shiftedStartIdx = shiftStartIndexByPrevSnippet(
+                      alignedStartIdx,
+                      previousEndSnippetTxt
+                    );
+                    if (shiftedStartIdx !== alignedStartIdx) {
+                      logger.warn(
+                        `[START_OVERLAP_FIX] Chunk ${index + 1} start moved ` +
+                        `from ${alignedStartIdx} → ${shiftedStartIdx} ` +
+                        `(prev end-snippet length ${previousEndSnippetTxt.length})`
+                      );
+                      alignedStartIdx = shiftedStartIdx;
+                    }
+                    // ------------------------------------------------------
+
+                    let alignedEndIdx = findWordPosition(
+                        finalCleanedText,
+                        chunk.endSnippet,
+                        chunk.endIndex + cumulativeOffset,
+                        false, // isStart
+                        alignedStartIdx // Pass the (potentially adjusted) start of the current chunk
+                    );
+
+                    console.log('\nWORD BOUNDARY RESULTS:');
+                    console.log(`- Original positions: ${chunk.startIndex}-${chunk.endIndex}`);
+                    console.log(`- Final adjusted positions: ${alignedStartIdx}-${alignedEndIdx}`);
+                    const startChange = alignedStartIdx - (chunk.startIndex + cumulativeOffset);
+                    const endChange = alignedEndIdx - (chunk.endIndex + cumulativeOffset);
+                    console.log(`- Position change: start ${startChange}, end ${endChange}`);
+                    console.log('======== END WORD BOUNDARY DETECTION ========');
+
+                    const drift = (alignedEndIdx - (chunk.endIndex + cumulativeOffset));
+                    console.log(`\nPosition drift: ${drift} characters from LLM's calculation (will be applied to future chunks)`);
+                    cumulativeOffset += drift;
+                    console.log(`Positions adjusted: ${chunk.startIndex + cumulativeOffset - drift}-${chunk.endIndex + cumulativeOffset - drift} -> ${alignedStartIdx}-${alignedEndIdx}`);
+
+                    const startIdxForDb = alignedStartIdx;
+                    const endIdxForDb = alignedEndIdx; // Assuming findWordPosition for end is already inclusive or handled by appendEndSnippetIfMissing
+
+                    //  `endIdxForDb` is inclusive → add 1 for JS slice
+                    const actualChunkContent =
+                      finalCleanedText.slice(startIdxForDb, endIdxForDb + 1);
+
+                    console.log('Re-extracted text with adjusted boundaries');
+                    console.log(`Final text: ${actualChunkContent.substring(0,30)}...`);
+
+                    // Update previousAdjustedEnd for the next iteration
+                    previousAdjustedEnd = endIdxForDb;
+                    previousEndSnippetTxt = chunk.endSnippet ?? '';
+
+                    return {
+                        ...chunk,
+                        startIndex: startIdxForDb,
+                        endIndex: endIdxForDb,
+                        cleanedText: actualChunkContent,
+                        startSnippet: chunk.startSnippet,
+                        endSnippet: chunk.endSnippet,
+                        startSnippetPosition: chunk.startIndex + cumulativeOffset,
+                        endSnippetPosition: chunk.endIndex + cumulativeOffset
+                    };
                 }
-                // --- 2️⃣  NEW start-shift to drop overlap ------------
-                const shiftedStartIdx = shiftStartIndexByPrevSnippet(
-                  alignedStartIdx,
-                  previousEndSnippetTxt
-                );
-                if (shiftedStartIdx !== alignedStartIdx) {
-                  logger.warn(
-                    `[START_OVERLAP_FIX] Chunk ${index + 1} start moved ` +
-                    `from ${alignedStartIdx} → ${shiftedStartIdx} ` +
-                    `(prev end-snippet length ${previousEndSnippetTxt.length})`
-                  );
-                  alignedStartIdx = shiftedStartIdx;
-                }
-                // ------------------------------------------------------
-
-                let alignedEndIdx = findWordPosition(
-                    finalCleanedText,
-                    chunk.endSnippet,
-                    chunk.endIndex + cumulativeOffset,
-                    false, // isStart
-                    alignedStartIdx // Pass the (potentially adjusted) start of the current chunk
-                );
-
-                console.log('\nWORD BOUNDARY RESULTS:');
-                console.log(`- Original positions: ${chunk.startIndex}-${chunk.endIndex}`);
-                console.log(`- Final adjusted positions: ${alignedStartIdx}-${alignedEndIdx}`);
-                const startChange = alignedStartIdx - (chunk.startIndex + cumulativeOffset);
-                const endChange = alignedEndIdx - (chunk.endIndex + cumulativeOffset);
-                console.log(`- Position change: start ${startChange}, end ${endChange}`);
-                console.log('======== END WORD BOUNDARY DETECTION ========');
-
-
-                const drift = (alignedEndIdx - (chunk.endIndex + cumulativeOffset));
-                console.log(`\nPosition drift: ${drift} characters from LLM's calculation (will be applied to future chunks)`);
-                cumulativeOffset += drift;
-                console.log(`Positions adjusted: ${chunk.startIndex + cumulativeOffset - drift}-${chunk.endIndex + cumulativeOffset - drift} -> ${alignedStartIdx}-${alignedEndIdx}`);
-
-                const startIdxForDb = alignedStartIdx;
-                const endIdxForDb = alignedEndIdx; // Assuming findWordPosition for end is already inclusive or handled by appendEndSnippetIfMissing
-
-                //  `endIdxForDb` is inclusive → add 1 for JS slice
-                const actualChunkContent =
-                  finalCleanedText.slice(startIdxForDb, endIdxForDb + 1);
-
-                console.log('Re-extracted text with adjusted boundaries');
-                console.log(`Final text: ${actualChunkContent.substring(0,30)}...`);
-
-
-                // Update previousAdjustedEnd for the next iteration
-                previousAdjustedEnd = endIdxForDb;
-                previousEndSnippetTxt = chunk.endSnippet ?? '';
-
-                return {
-                    ...chunk,
-                    startIndex: startIdxForDb,
-                    endIndex: endIdxForDb,
-                    cleanedText: actualChunkContent,
-                    startSnippet: chunk.startSnippet,
-                    endSnippet: chunk.endSnippet,
-                    startSnippetPosition: chunk.startIndex + cumulativeOffset,
-                    endSnippetPosition: chunk.endIndex + cumulativeOffset
-                };
             });
         } else {
             // If LLM didn't return chunks, treat entire cleaned text as remainder

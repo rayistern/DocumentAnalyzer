@@ -279,10 +279,19 @@ export function extractChunksFromString(jsonText) {
  */
 export function createSingleDocumentChunk(text) {
     console.log("[HEBREW-HANDLING] Creating single document chunk as fallback");
+    
+    // Get the first and last few words for snippets
+    const firstWords = text.substring(0, Math.min(50, text.length)).trim();
+    const lastWords = text.substring(Math.max(0, text.length - 50)).trim();
+    
     return {
         chunks: [{
-            startIndex: 1,
-            endIndex: text.length,
+            chunkIndex: 1,
+            title: "Complete Document",
+            startIndex: 0,
+            endIndex: text.length - 1,
+            startSnippet: firstWords,
+            endSnippet: lastWords,
             content: text,
             firstWords: text.substring(0, Math.min(30, text.length)),
             lastWords: text.substring(Math.max(0, text.length - 30)),
@@ -356,16 +365,88 @@ export function repairJson(jsonText) {
     } catch (error) {
         console.log(`[JSON-REPAIR] Attempting to fix JSON: ${error.message}`);
         
-        // Fix 1: Apply control character cleaning again to be safe
+        // Fix 1: Apply Hebrew JSON sanitization first
+        try {
+            repairedJson = sanitizeHebrewJson(repairedJson);
+            
+            // Try parsing after Hebrew sanitization
+            JSON.parse(repairedJson);
+            console.log(`[JSON-REPAIR] Fixed with Hebrew sanitization`);
+            return repairedJson;
+        } catch (hebrewError) {
+            console.log(`[JSON-REPAIR] Hebrew sanitization didn't fix it: ${hebrewError.message}`);
+            // Continue with other repair attempts
+        }
+        
+        // Fix 2: Apply control character cleaning again to be safe
         repairedJson = cleanControlCharacters(repairedJson);
         
-        // Fix 2: Remove trailing commas in arrays and objects
+        // Fix 3: Handle specific Hebrew quote issues that cause position-based errors
+        if (error.message.includes('Expected') && error.message.includes('position')) {
+            const position = parseInt(error.message.match(/position (\d+)/)?.[1]);
+            if (position) {
+                console.log(`[JSON-REPAIR] Attempting targeted fix at position ${position}`);
+                
+                // Look around the error position for problematic patterns
+                const start = Math.max(0, position - 50);
+                const end = Math.min(repairedJson.length, position + 50);
+                const context = repairedJson.substring(start, end);
+                
+                // Common pattern: unescaped quotes in Hebrew text
+                if (context.includes('"') && /[א-ת]/.test(context)) {
+                    // Find the string value that contains the error
+                    let stringStart = -1;
+                    let stringEnd = -1;
+                    
+                    // Work backwards to find the start of the current string
+                    for (let i = position; i >= 0; i--) {
+                        if (repairedJson[i] === '"' && (i === 0 || repairedJson[i-1] !== '\\')) {
+                            stringStart = i;
+                            break;
+                        }
+                    }
+                    
+                    // Work forwards to find the end of the current string
+                    if (stringStart >= 0) {
+                        for (let i = position; i < repairedJson.length; i++) {
+                            if (repairedJson[i] === '"' && repairedJson[i-1] !== '\\') {
+                                stringEnd = i;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (stringStart >= 0 && stringEnd > stringStart) {
+                        const stringContent = repairedJson.substring(stringStart + 1, stringEnd);
+                        const fixedContent = stringContent.replace(/(?<!\\)"/g, '\\"');
+                        
+                        repairedJson = 
+                            repairedJson.substring(0, stringStart + 1) + 
+                            fixedContent + 
+                            repairedJson.substring(stringEnd);
+                            
+                        console.log(`[JSON-REPAIR] Applied targeted quote fix at position ${position}`);
+                        
+                        // Try parsing after targeted fix
+                        try {
+                            JSON.parse(repairedJson);
+                            console.log(`[JSON-REPAIR] Fixed with targeted quote repair`);
+                            return repairedJson;
+                        } catch (targetedError) {
+                            console.log(`[JSON-REPAIR] Targeted fix didn't work: ${targetedError.message}`);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Fix 4: Remove trailing commas in arrays and objects
         repairedJson = repairedJson.replace(/,\s*([\]}])/g, '$1');
         
-        // Fix 3: Try to fix unquoted property names
+        // Fix 5: Try to fix unquoted property names
         repairedJson = repairedJson.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)(\s*:)/g, '$1"$2"$3');
         
-        // Fix 4: Attempt to fix the specific qa_pair issue
+        // Fix 6: Attempt to fix the specific qa_pair issue
         // Handle erroneous nesting of fields inside qa_pair
         if (repairedJson.includes('"qa_pair"') && 
             (repairedJson.includes('"potential_typos"') || 
@@ -526,8 +607,54 @@ export function fixMetadataStructure(parsedObject) {
  * @param {string} text - The raw JSON string that might contain control characters
  * @returns {string} - The cleaned JSON string with control characters removed
  */
+/**
+ * Robust JSON sanitization for Hebrew text with embedded quotes
+ */
+export function sanitizeHebrewJson(text) {
+    if (!text) return text;
+    
+    let sanitized = text;
+    
+    // Step 1: Handle Hebrew quotation marks first
+    // Replace Hebrew quotation marks with escaped ASCII quotes
+    sanitized = sanitized.replace(/[""״״]/g, '\\"');
+    
+    // Step 2: More aggressive quote escaping for Hebrew text in JSON strings
+    // Find JSON string values that contain Hebrew and unescaped quotes
+    const hebrewStringPattern = /"([^"]*[א-ת][^"]*(?:[^\\]"[^"]*[א-ת][^"]*)*)"(?=\s*[,}])/g;
+    sanitized = sanitized.replace(hebrewStringPattern, (match, content) => {
+        // Escape any unescaped quotes within the Hebrew content
+        const escapedContent = content.replace(/(?<!\\)"/g, '\\"');
+        return `"${escapedContent}"`;
+    });
+    
+    // Step 3: Handle specific pattern from the logs - quotes in Hebrew abbreviations
+    // Pattern like: הבעש"ט should become הבעש\\"ט
+    sanitized = sanitized.replace(/([א-ת])"([א-ת])/g, '$1\\"$2');
+    
+    // Step 4: Fix cases where quotes appear at the end of Hebrew words
+    // Pattern like: זלה"ה should become זלה\\"ה  
+    sanitized = sanitized.replace(/([א-ת])"([הא])/g, '$1\\"$2');
+    
+    // Step 5: Handle quotes in Hebrew text within JSON string values more aggressively
+    // Look for patterns like: "text with הבעש"ט in it"
+    sanitized = sanitized.replace(/"([^"]*[א-ת][^"]*)"([^"]*[א-ת][^"]*)"([^"]*)"(\s*[,}])/g, (match, part1, part2, part3, ending) => {
+        // This is likely a Hebrew string with an unescaped quote in the middle
+        const escapedMiddle = part2.replace(/"/g, '\\"');
+        return `"${part1}\\"${escapedMiddle}\\"${part3}"${ending}`;
+    });
+    
+    // Step 5: Fix malformed escape sequences
+    sanitized = sanitized.replace(/\\(?!["\\/bfnrt])/g, '\\\\');
+    
+    return sanitized;
+}
+
 export function cleanControlCharacters(text) {
     if (!text) return text;
+    
+    // Temporarily disable Hebrew sanitization to avoid new bugs
+    // let cleanedText = sanitizeHebrewJson(text);
     
     // Step 1: Replace all ASCII control characters (0-31) except tabs, newlines and carriage returns
     let cleanedText = text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ' ');
@@ -1122,7 +1249,9 @@ export function parseJsonResponse(jsonResponseText, cleanedText = null, schemaTy
     // Final fallback: Create appropriate empty object based on schema type
     if (schemaType === 'chunk') {
         console.log("[HEBREW-HANDLING] All parsing attempts failed. Creating single document chunk.");
-        return createSingleDocumentChunk(cleanedText);
+        // Safety check: if cleanedText is null/undefined, use the original sanitized JSON as fallback
+        const textToUse = cleanedText || sanitizedJson || jsonResponseText || "";
+        return createSingleDocumentChunk(textToUse);
     } else if (schemaType === 'metadata' || schemaType === 'fullMetadata') {
         console.log(`[HEBREW-HANDLING] All parsing attempts failed. Creating empty ${schemaType} object.`);
         // Return empty metadata object with minimum required structure
