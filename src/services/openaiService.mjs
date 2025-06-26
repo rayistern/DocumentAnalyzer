@@ -1454,8 +1454,14 @@ async function cleanAndChunkDocument(
 
                   if (actualChunkContent && sIdxForDb !== -1 && eIdxForDb !== -1) {
                     logger.info(`[openaiService] Chunk "${title}" processed successfully. Length: ${actualChunkContent.length}, Indices: ${sIdxForDb}-${eIdxForDb}`);
+                    // CRITICAL: Attach the extracted content to the chunk object
+                    rawChunk.cleanedText = actualChunkContent;
+                    rawChunk.startIndex = sIdxForDb;
+                    rawChunk.endIndex = eIdxForDb;
                   } else {
                     logger.warn(`[openaiService] Chunk "${title}" could not be processed or resulted in empty content.`);
+                    // Mark failed chunks
+                    rawChunk.cleanedText = null;
                   }
                 }
             }
