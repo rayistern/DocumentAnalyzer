@@ -281,8 +281,27 @@ export async function saveAnalysis(content, type, metadata = {}) {
             const contentHash = calculateContentHash(content);
             console.log(`[${timestamp}] Content hash: ${contentHash}`);
 
-            // Extract header (first line)
-            const header = content.split('\n')[0];
+            // Extract header (first line) with detailed logging
+            const lines = content.split('\n');
+            console.log(`[${timestamp}] DEBUG: Total lines in content: ${lines.length}`);
+            console.log(`[${timestamp}] DEBUG: First 5 lines:`);
+            for (let i = 0; i < Math.min(5, lines.length); i++) {
+                console.log(`[${timestamp}] DEBUG: Line ${i}: "${lines[i]}" (length: ${lines[i].length})`);
+            }
+            
+            // Find first non-empty line
+            let header = '';
+            let headerLineIndex = -1;
+            for (let i = 0; i < lines.length; i++) {
+                const trimmedLine = lines[i].trim();
+                if (trimmedLine.length > 0) {
+                    header = trimmedLine;
+                    headerLineIndex = i;
+                    break;
+                }
+            }
+            
+            console.log(`[${timestamp}] DEBUG: Found header at line ${headerLineIndex}: "${header}"`);
             console.log(`[${timestamp}] Extracted header: "${header.substring(0, Math.min(50, header.length))}${header.length > 50 ? '...' : ''}"`);
 
             // Save initial document

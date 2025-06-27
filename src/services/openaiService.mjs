@@ -916,8 +916,27 @@ async function cleanAndChunkDocument(
     console.log(`Continuation mode: ${isContinuation ? 'ON' : 'OFF'}`);
     console.log(`Group number: ${groupNumber || 'none'}`);
 
-    // Extract header (first line) before any processing
-    const header = content.split('\n')[0];
+    // Extract header (first line) before any processing with detailed logging
+    const lines = content.split('\n');
+    console.log(`DEBUG: Total lines in content: ${lines.length}`);
+    console.log(`DEBUG: First 5 lines:`);
+    for (let i = 0; i < Math.min(5, lines.length); i++) {
+        console.log(`DEBUG: Line ${i}: "${lines[i]}" (length: ${lines[i].length})`);
+    }
+    
+    // Find first non-empty line
+    let header = '';
+    let headerLineIndex = -1;
+    for (let i = 0; i < lines.length; i++) {
+        const trimmedLine = lines[i].trim();
+        if (trimmedLine.length > 0) {
+            header = trimmedLine;
+            headerLineIndex = i;
+            break;
+        }
+    }
+    
+    console.log(`DEBUG: Found header at line ${headerLineIndex}: "${header}"`);
     console.log(`Extracted header: "${header.substring(0, Math.min(50, header.length))}${header.length > 50 ? '...' : ''}"`);
 
     // Track remainder text for each pre-chunk
@@ -1064,7 +1083,7 @@ async function cleanAndChunkDocument(
         } else {
             console.log(`Saved pre-chunk ${i + 1} to database successfully`);
 
-            // Store the prechunk ID in the preChunks array for later use
+                // Store the prechunk ID in the preChunks array for later use
             if (insertedPrechunk && insertedPrechunk.id) {
                 preChunks[i].prechunkId = insertedPrechunk.id;
                 console.log(`Retrieved prechunk ID ${insertedPrechunk.id} for prechunk ${i + 1}`);
@@ -1531,96 +1550,96 @@ async function cleanAndChunkDocument(
                 console.log('\n======== INDEX-BASED PROCESSING ========');
                 console.log('Using word boundary detection for index-based chunking');
                 
-                let cumulativeOffset = 0;  // Resets for each prechunk's LLM call
-                let previousAdjustedEnd = 0;  // Tracks last chunk's end position
-                let previousEndSnippetTxt = ''; // for start-shift fix
-                
-                parsedResponse.chunks = parsedResponse.chunks.map((chunk, index) => {
-                    console.log(`\nChunk ${index + 1}:`);
-                    console.log(`Original: Start: ${chunk.startIndex}, End: ${chunk.endIndex}`);
-                    console.log(`After offset adjustment: Start: ${chunk.startIndex + cumulativeOffset}, End: ${chunk.endIndex + cumulativeOffset}`);
+            let cumulativeOffset = 0;  // Resets for each prechunk's LLM call
+            let previousAdjustedEnd = 0;  // Tracks last chunk's end position
+            let previousEndSnippetTxt = ''; // for start-shift fix
+            
+            parsedResponse.chunks = parsedResponse.chunks.map((chunk, index) => {
+                console.log(`\nChunk ${index + 1}:`);
+                console.log(`Original: Start: ${chunk.startIndex}, End: ${chunk.endIndex}`);
+                console.log(`After offset adjustment: Start: ${chunk.startIndex + cumulativeOffset}, End: ${chunk.endIndex + cumulativeOffset}`);
 
-                    console.log(`\n======== WORD BOUNDARY DETECTION - CHUNK ${index + 1} ========`);
-                    console.log("Finding exact word boundaries for precise chunking:");
-                    console.log(`- First word to find: "${chunk.startSnippet}"`);
-                    console.log(`- Last word to find: "${chunk.endSnippet}"`);
-                    console.log(`- Starting search at positions: ${chunk.startIndex + cumulativeOffset}-${chunk.endIndex + cumulativeOffset}`);
+                console.log(`\n======== WORD BOUNDARY DETECTION - CHUNK ${index + 1} ========`);
+                console.log("Finding exact word boundaries for precise chunking:");
+                console.log(`- First word to find: "${chunk.startSnippet}"`);
+                console.log(`- Last word to find: "${chunk.endSnippet}"`);
+                console.log(`- Starting search at positions: ${chunk.startIndex + cumulativeOffset}-${chunk.endIndex + cumulativeOffset}`);
 
-                    let alignedStartIdx = findWordPosition(
-                        finalCleanedText,
-                        chunk.startSnippet,
-                        chunk.startIndex + cumulativeOffset,
-                        true, // isStart
-                        previousAdjustedEnd // Pass the end of the previous chunk
-                    );
+                let alignedStartIdx = findWordPosition(
+                    finalCleanedText,
+                    chunk.startSnippet,
+                    chunk.startIndex + cumulativeOffset,
+                    true, // isStart
+                    previousAdjustedEnd // Pass the end of the previous chunk
+                );
 
-                    // --- 1️⃣  keep chunks contiguous (old logic) ----------
-                    if (index > 0 && alignedStartIdx > previousAdjustedEnd + 1) {
-                        const oldAlignedStartIdx = alignedStartIdx;
-                        alignedStartIdx = previousAdjustedEnd + 1;
-                        logger.warn(`[CONTIGUOUS_CHUNK_FIX] Chunk ${index + 1} start index adjusted to be contiguous. Was: ${oldAlignedStartIdx}, Now: ${alignedStartIdx}. Previous chunk ended at: ${previousAdjustedEnd}`);
-                    }
-                    // --- 2️⃣  NEW start-shift to drop overlap ------------
-                    const shiftedStartIdx = shiftStartIndexByPrevSnippet(
-                      alignedStartIdx,
-                      previousEndSnippetTxt
-                    );
-                    if (shiftedStartIdx !== alignedStartIdx) {
-                      logger.warn(
-                        `[START_OVERLAP_FIX] Chunk ${index + 1} start moved ` +
-                        `from ${alignedStartIdx} → ${shiftedStartIdx} ` +
-                        `(prev end-snippet length ${previousEndSnippetTxt.length})`
-                      );
-                      alignedStartIdx = shiftedStartIdx;
-                    }
-                    // ------------------------------------------------------
+                // --- 1️⃣  keep chunks contiguous (old logic) ----------
+                if (index > 0 && alignedStartIdx > previousAdjustedEnd + 1) {
+                    const oldAlignedStartIdx = alignedStartIdx;
+                    alignedStartIdx = previousAdjustedEnd + 1;
+                    logger.warn(`[CONTIGUOUS_CHUNK_FIX] Chunk ${index + 1} start index adjusted to be contiguous. Was: ${oldAlignedStartIdx}, Now: ${alignedStartIdx}. Previous chunk ended at: ${previousAdjustedEnd}`);
+                }
+                // --- 2️⃣  NEW start-shift to drop overlap ------------
+                const shiftedStartIdx = shiftStartIndexByPrevSnippet(
+                  alignedStartIdx,
+                  previousEndSnippetTxt
+                );
+                if (shiftedStartIdx !== alignedStartIdx) {
+                  logger.warn(
+                    `[START_OVERLAP_FIX] Chunk ${index + 1} start moved ` +
+                    `from ${alignedStartIdx} → ${shiftedStartIdx} ` +
+                    `(prev end-snippet length ${previousEndSnippetTxt.length})`
+                  );
+                  alignedStartIdx = shiftedStartIdx;
+                }
+                // ------------------------------------------------------
 
-                    let alignedEndIdx = findWordPosition(
-                        finalCleanedText,
-                        chunk.endSnippet,
-                        chunk.endIndex + cumulativeOffset,
-                        false, // isStart
-                        alignedStartIdx // Pass the (potentially adjusted) start of the current chunk
-                    );
+                let alignedEndIdx = findWordPosition(
+                    finalCleanedText,
+                    chunk.endSnippet,
+                    chunk.endIndex + cumulativeOffset,
+                    false, // isStart
+                    alignedStartIdx // Pass the (potentially adjusted) start of the current chunk
+                );
 
-                    console.log('\nWORD BOUNDARY RESULTS:');
-                    console.log(`- Original positions: ${chunk.startIndex}-${chunk.endIndex}`);
-                    console.log(`- Final adjusted positions: ${alignedStartIdx}-${alignedEndIdx}`);
-                    const startChange = alignedStartIdx - (chunk.startIndex + cumulativeOffset);
-                    const endChange = alignedEndIdx - (chunk.endIndex + cumulativeOffset);
-                    console.log(`- Position change: start ${startChange}, end ${endChange}`);
-                    console.log('======== END WORD BOUNDARY DETECTION ========');
+                console.log('\nWORD BOUNDARY RESULTS:');
+                console.log(`- Original positions: ${chunk.startIndex}-${chunk.endIndex}`);
+                console.log(`- Final adjusted positions: ${alignedStartIdx}-${alignedEndIdx}`);
+                const startChange = alignedStartIdx - (chunk.startIndex + cumulativeOffset);
+                const endChange = alignedEndIdx - (chunk.endIndex + cumulativeOffset);
+                console.log(`- Position change: start ${startChange}, end ${endChange}`);
+                console.log('======== END WORD BOUNDARY DETECTION ========');
 
-                    const drift = (alignedEndIdx - (chunk.endIndex + cumulativeOffset));
-                    console.log(`\nPosition drift: ${drift} characters from LLM's calculation (will be applied to future chunks)`);
-                    cumulativeOffset += drift;
-                    console.log(`Positions adjusted: ${chunk.startIndex + cumulativeOffset - drift}-${chunk.endIndex + cumulativeOffset - drift} -> ${alignedStartIdx}-${alignedEndIdx}`);
+                const drift = (alignedEndIdx - (chunk.endIndex + cumulativeOffset));
+                console.log(`\nPosition drift: ${drift} characters from LLM's calculation (will be applied to future chunks)`);
+                cumulativeOffset += drift;
+                console.log(`Positions adjusted: ${chunk.startIndex + cumulativeOffset - drift}-${chunk.endIndex + cumulativeOffset - drift} -> ${alignedStartIdx}-${alignedEndIdx}`);
 
-                    const startIdxForDb = alignedStartIdx;
-                    const endIdxForDb = alignedEndIdx; // Assuming findWordPosition for end is already inclusive or handled by appendEndSnippetIfMissing
+                const startIdxForDb = alignedStartIdx;
+                const endIdxForDb = alignedEndIdx; // Assuming findWordPosition for end is already inclusive or handled by appendEndSnippetIfMissing
 
-                    //  `endIdxForDb` is inclusive → add 1 for JS slice
-                    const actualChunkContent =
-                      finalCleanedText.slice(startIdxForDb, endIdxForDb + 1);
+                //  `endIdxForDb` is inclusive → add 1 for JS slice
+                const actualChunkContent =
+                  finalCleanedText.slice(startIdxForDb, endIdxForDb + 1);
 
-                    console.log('Re-extracted text with adjusted boundaries');
-                    console.log(`Final text: ${actualChunkContent.substring(0,30)}...`);
+                console.log('Re-extracted text with adjusted boundaries');
+                console.log(`Final text: ${actualChunkContent.substring(0,30)}...`);
 
-                    // Update previousAdjustedEnd for the next iteration
-                    previousAdjustedEnd = endIdxForDb;
-                    previousEndSnippetTxt = chunk.endSnippet ?? '';
+                // Update previousAdjustedEnd for the next iteration
+                previousAdjustedEnd = endIdxForDb;
+                previousEndSnippetTxt = chunk.endSnippet ?? '';
 
-                    return {
-                        ...chunk,
-                        startIndex: startIdxForDb,
-                        endIndex: endIdxForDb,
-                        cleanedText: actualChunkContent,
-                        startSnippet: chunk.startSnippet,
-                        endSnippet: chunk.endSnippet,
-                        startSnippetPosition: chunk.startIndex + cumulativeOffset,
-                        endSnippetPosition: chunk.endIndex + cumulativeOffset
-                    };
-                });
+                return {
+                    ...chunk,
+                    startIndex: startIdxForDb,
+                    endIndex: endIdxForDb,
+                    cleanedText: actualChunkContent,
+                    startSnippet: chunk.startSnippet,
+                    endSnippet: chunk.endSnippet,
+                    startSnippetPosition: chunk.startIndex + cumulativeOffset,
+                    endSnippetPosition: chunk.endIndex + cumulativeOffset
+                };
+            });
                 console.log('======== END INDEX-BASED PROCESSING ========');
             }
         } else {
@@ -1808,11 +1827,21 @@ async function cleanAndChunkDocument(
                 // Find the corresponding prechunk for this chunk
                 let prechunkId = null;
                 // Loop through preChunks to find the one that contains this chunk's start position
+                console.log(`DEBUG: Looking for prechunk match for chunk starting at ${chunk.adjustedStartIndex || chunk.startIndex}`);
+                console.log(`DEBUG: Available preChunks:`, preChunks.map(pc => ({
+                    index: pc.chunkIndex,
+                    startPos: pc.startPosition,
+                    endPos: pc.endPosition,
+                    prechunkId: pc.prechunkId
+                })));
+                
                 for (const preChunk of preChunks) {
                     const startPos = chunk.adjustedStartIndex || chunk.startIndex;
                     const chunkStartPos = parseInt(startPos);
                     const preChunkStart = parseInt(preChunk.startPosition);
                     const preChunkEnd = parseInt(preChunk.endPosition);
+                    
+                    console.log(`DEBUG: Checking prechunk ${preChunk.chunkIndex}: range ${preChunkStart}-${preChunkEnd}, chunk starts at ${chunkStartPos}, prechunkId=${preChunk.prechunkId}`);
                     
                     // If the chunk starts within this prechunk's range and we have a stored prechunkId
                     if (chunkStartPos >= preChunkStart && chunkStartPos <= preChunkEnd && preChunk.prechunkId) {
@@ -1820,6 +1849,10 @@ async function cleanAndChunkDocument(
                         console.log(`Found matching prechunk ${prechunkId} for chunk starting at position ${chunkStartPos}`);
                         break;
                     }
+                }
+                
+                if (!prechunkId) {
+                    console.log(`WARNING: No matching prechunk found for chunk starting at ${chunk.adjustedStartIndex || chunk.startIndex}`);
                 }
                 
                 return {
