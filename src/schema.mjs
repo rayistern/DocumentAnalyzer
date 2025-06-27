@@ -39,7 +39,7 @@ export const documentSources = pgTable('document_sources', {
 });
 
 export const prechunks = pgTable('prechunks', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: integer('id').primaryKey(),
   documentId: uuid('document_id').references(() => documents.id),
   chunkIndex: integer('chunk_index').notNull(),
   text: text('text').notNull(),
@@ -63,7 +63,7 @@ export const chunks = pgTable('chunks', {
   originalText: text('original_text').notNull(),
   warnings: text('warnings'),
   rawMetadata: jsonb('raw_metadata'),
-  prechunkId: uuid('prechunk_id').references(() => prechunks.id),
+  prechunkId: integer('prechunk_id').references(() => prechunks.id),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
 });
 
