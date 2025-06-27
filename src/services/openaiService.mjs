@@ -1844,15 +1844,25 @@ async function cleanAndChunkDocument(
                     console.log(`DEBUG: Checking prechunk ${preChunk.chunkIndex}: range ${preChunkStart}-${preChunkEnd}, chunk starts at ${chunkStartPos}, prechunkId=${preChunk.prechunkId}`);
                     
                     // If the chunk starts within this prechunk's range and we have a stored prechunkId
-                    if (chunkStartPos >= preChunkStart && chunkStartPos <= preChunkEnd && preChunk.prechunkId) {
+                    // Use more flexible matching to account for position shifts after cleaning
+                    const isWithinRange = chunkStartPos >= preChunkStart && chunkStartPos <= preChunkEnd;
+                    const isCloseToStart = Math.abs(chunkStartPos - preChunkStart) <= 5; // Allow 5 char tolerance at start
+                    const isCloseToEnd = Math.abs(chunkStartPos - preChunkEnd) <= 5; // Allow 5 char tolerance at end
+                    
+                    if ((isWithinRange || isCloseToStart || isCloseToEnd) && preChunk.prechunkId) {
                         prechunkId = preChunk.prechunkId;
-                        console.log(`Found matching prechunk ${prechunkId} for chunk starting at position ${chunkStartPos}`);
+                        console.log(`Found matching prechunk ${prechunkId} for chunk starting at position ${chunkStartPos} (tolerance matching)`);
                         break;
                     }
                 }
                 
-                if (!prechunkId) {
+                if (!prechunkId && preChunks.length > 0) {
                     console.log(`WARNING: No matching prechunk found for chunk starting at ${chunk.adjustedStartIndex || chunk.startIndex}`);
+                    // Fallback: Use the first available prechunk ID if there's only one prechunk
+                    if (preChunks.length === 1 && preChunks[0].prechunkId) {
+                        prechunkId = preChunks[0].prechunkId;
+                        console.log(`FALLBACK: Using single available prechunk ID ${prechunkId}`);
+                    }
                 }
                 
                 return {

@@ -14,7 +14,21 @@ setupProcessTimeout();
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
+  process.env.SUPABASE_ANON_KEY,
+  {
+    db: {
+      schema: 'public',
+    },
+    global: {
+      headers: {
+        'X-Client-Info': 'supabase-js/2.0.0',
+      },
+    },
+    // Add timeout configuration
+    realtime: {
+      timeout: 30000,
+    }
+  }
 )
 
 export { supabase };
