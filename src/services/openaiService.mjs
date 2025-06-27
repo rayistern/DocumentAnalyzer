@@ -1046,9 +1046,12 @@ async function cleanAndChunkDocument(
                 }
             });
             
-            const { error: prechunkError } = await supabase
+            // Insert prechunk and get the ID back in one operation
+            const { data: insertedPrechunk, error: prechunkError } = await supabase
                 .from('prechunks')
-                .insert(prechunkData);
+                .insert(prechunkData)
+                .select('id')
+                .single();
 
         if (prechunkError) {
             console.error(`Error saving pre-chunk ${i + 1}:`, prechunkError);
@@ -1061,21 +1064,12 @@ async function cleanAndChunkDocument(
         } else {
             console.log(`Saved pre-chunk ${i + 1} to database successfully`);
 
-            // Get the prechunk ID to associate with chunks later
-            const { data: prechunkData, error: prechunkSelectError } = await supabase
-                .from('prechunks')
-                .select('id')
-                .eq('document_id', document.id)
-                .eq('chunk_index', i)
-                .order('created_at', { ascending: false })
-                .limit(1);
-                
-            if (prechunkSelectError) {
-                console.error(`Error retrieving prechunk ID for prechunk ${i + 1}:`, prechunkSelectError);
-            } else if (prechunkData && prechunkData.length > 0) {
-                // Store the prechunk ID in the preChunks array for later use
-                preChunks[i].prechunkId = prechunkData[0].id;
-                console.log(`Retrieved prechunk ID ${prechunkData[0].id} for prechunk ${i + 1}`);
+            // Store the prechunk ID in the preChunks array for later use
+            if (insertedPrechunk && insertedPrechunk.id) {
+                preChunks[i].prechunkId = insertedPrechunk.id;
+                console.log(`Retrieved prechunk ID ${insertedPrechunk.id} for prechunk ${i + 1}`);
+            } else {
+                console.error(`No prechunk ID returned for prechunk ${i + 1}`);
             }
             }
         } catch (err) {
