@@ -704,6 +704,7 @@ function buildChunkRow(chunk, docId) {
     last_word: (chunk.endSnippet || chunk.lastWord || chunk.lastWords || '').split(/\s+/).pop() ?? '',
     start_snippet: chunk.startSnippet ?? null,
     end_snippet: chunk.endSnippet ?? null,
+    prechunk_id: chunk.prechunk_id ?? null,
   };
 }
 

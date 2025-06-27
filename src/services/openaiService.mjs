@@ -1488,59 +1488,62 @@ async function cleanAndChunkDocument(
             console.log(`Number of chunks returned: ${parsedResponse.chunks.length}`);
             
             /**
-             * POSITION ADJUSTMENT LOGIC
+             * SNIPPET-BASED VS INDEX-BASED CHUNKING LOGIC
              * 
-             * 1. The LLM returns positions relative to the text it received (finalCleanedText)
-             * 2. The finalCleanedText already includes remainder text at the beginning
-             * 3. Within each prechunk, we track position drift with cumulativeOffset
-             * 4. Each prechunk resets cumulativeOffset because each is a separate LLM call
+             * For snippet-based chunking (boundary-style=text):
+             * - LLM returns positions relative to finalCleanedText (which includes remainder)
+             * - Snippet extraction already found exact positions - no adjustment needed
+             * - No cumulative drift, no overlap issues, no word boundary detection needed
              * 
-             * This approach ensures:
-             * - Remainder text length is automatically accounted for (it's part of finalCleanedText)
-             * - Position drift within a single LLM response is tracked and corrected
-             * - Word boundaries are accurately detected even with Unicode/special characters
+             * For index-based chunking (boundary-style=indices):
+             * - Use traditional word boundary detection and position adjustment
+             * - Track cumulative drift and handle overlaps
              */
-            let cumulativeOffset = 0;  // Resets for each prechunk's LLM call
-            let previousAdjustedEnd = 0;  // Tracks last chunk's end position
-            let previousEndSnippetTxt = ''; // for start-shift fix
             
-            parsedResponse.chunks = parsedResponse.chunks.map((chunk, index) => {
-                console.log(`\nChunk ${index + 1}:`);
-                console.log(`Original: Start: ${chunk.startIndex}, End: ${chunk.endIndex}`);
+            if (boundaryStyle === 'text') {
+                // SNIPPET-BASED: Use positions from snippet extraction directly
+                console.log('\n======== SNIPPET-BASED PROCESSING ========');
+                console.log('Using snippet extraction results directly (no word boundary adjustments)');
                 
-                // Check if we're using snippet-based chunking (startIndex/endIndex are undefined)
-                const isSnippetBased = chunk.startIndex === undefined || chunk.endIndex === undefined;
-                
-                if (isSnippetBased) {
-                    console.log(`\n======== SNIPPET-BASED CHUNK ${index + 1} ========`);
-                    console.log("Using snippet-based positioning - word boundary detection skipped");
-                    console.log(`- Chunk already processed with startSnippet: "${chunk.startSnippet}"`);
-                    console.log(`- Chunk already processed with endSnippet: "${chunk.endSnippet}"`);
-                    console.log(`- Chunk content length: ${chunk.cleanedText?.length || 0}`);
-                    
-                    // For snippet-based chunks, the cleanedText and positions are already set correctly
-                    // We just need to extract the DB indices from the existing content
-                    const startIdxForDb = chunk.startIndex || 0;
-                    const endIdxForDb = chunk.endIndex || (chunk.cleanedText?.length - 1) || 0;
-                    
-                    console.log(`- Database indices: ${startIdxForDb}-${endIdxForDb}`);
-                    console.log('======== END SNIPPET-BASED CHUNK ========');
-                    
-                    // Update previousAdjustedEnd for the next iteration
-                    previousAdjustedEnd = endIdxForDb;
-                    previousEndSnippetTxt = chunk.endSnippet ?? '';
-                    
+                parsedResponse.chunks = parsedResponse.chunks.map((chunk, index) => {
+                    console.log(`\nChunk ${index + 1} (Snippet-Based):`);
+                    console.log(`- Start: ${chunk.startIndex}, End: ${chunk.endIndex}`);
+                    console.log(`- Start snippet: "${chunk.startSnippet?.substring(0, 50)}${chunk.startSnippet?.length > 50 ? '...' : ''}"`);
+                    console.log(`- End snippet: "${chunk.endSnippet?.substring(0, 50)}${chunk.endSnippet?.length > 50 ? '...' : ''}"`);
+
+                    // Use the positions directly from snippet extraction
+                    const startIdxForDb = chunk.startIndex;
+                    const endIdxForDb = chunk.endIndex;
+
+                    // Extract content using the snippet-based positions
+                    const actualChunkContent = finalCleanedText.slice(startIdxForDb, endIdxForDb + 1);
+
+                    console.log(`- Content length: ${actualChunkContent.length} characters`);
+                    console.log(`- Content preview: "${actualChunkContent.substring(0, 50)}${actualChunkContent.length > 50 ? '...' : ''}"`);
+
                     return {
                         ...chunk,
                         startIndex: startIdxForDb,
                         endIndex: endIdxForDb,
-                        // Keep the existing cleanedText from snippet extraction
-                        cleanedText: chunk.cleanedText,
+                        cleanedText: actualChunkContent,
                         startSnippet: chunk.startSnippet,
                         endSnippet: chunk.endSnippet
                     };
-                } else {
-                    // Original word boundary detection logic for index-based chunks
+                });
+                console.log('======== END SNIPPET-BASED PROCESSING ========');
+                
+            } else {
+                // INDEX-BASED: Use traditional word boundary detection
+                console.log('\n======== INDEX-BASED PROCESSING ========');
+                console.log('Using word boundary detection for index-based chunking');
+                
+                let cumulativeOffset = 0;  // Resets for each prechunk's LLM call
+                let previousAdjustedEnd = 0;  // Tracks last chunk's end position
+                let previousEndSnippetTxt = ''; // for start-shift fix
+                
+                parsedResponse.chunks = parsedResponse.chunks.map((chunk, index) => {
+                    console.log(`\nChunk ${index + 1}:`);
+                    console.log(`Original: Start: ${chunk.startIndex}, End: ${chunk.endIndex}`);
                     console.log(`After offset adjustment: Start: ${chunk.startIndex + cumulativeOffset}, End: ${chunk.endIndex + cumulativeOffset}`);
 
                     console.log(`\n======== WORD BOUNDARY DETECTION - CHUNK ${index + 1} ========`);
@@ -1623,8 +1626,9 @@ async function cleanAndChunkDocument(
                         startSnippetPosition: chunk.startIndex + cumulativeOffset,
                         endSnippetPosition: chunk.endIndex + cumulativeOffset
                     };
-                }
-            });
+                });
+                console.log('======== END INDEX-BASED PROCESSING ========');
+            }
         } else {
             // If LLM didn't return chunks, treat entire cleaned text as remainder
             remainderText = finalCleanedText;
